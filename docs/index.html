@@ -19,6 +19,7 @@
   <header id="topbar">
     <button id="menuBtn" class="round" aria-label="Menü">⋯</button>
     <button id="searchBtn" class="round" aria-label="Orte suchen">🔍</button>
+    <button id="remBtn" class="round" aria-label="Erinnerungen">🩺<span id="remBadge" hidden></span></button>
     <div id="filters" role="group" aria-label="Filter"></div>
   </header>
 
@@ -104,6 +105,65 @@
     <input id="walkImportFile" type="file" accept="application/json,.json" hidden>
     <button id="clearBtn" class="btn danger">Alle Orte löschen</button>
     <button id="closeMenu" class="btn ghost">Schließen</button>
+  </section>
+
+  <!-- Erinnerungen: Liste (Vollbild) -->
+  <section id="remView" hidden aria-label="Erinnerungen">
+    <div id="remHead">
+      <h2>🩺 Erinnerungen</h2>
+      <button id="remViewClose" type="button" class="btn ghost">Fertig</button>
+    </div>
+    <div id="remTop">
+      <button id="remNew" type="button" class="btn primary">＋ Neue Erinnerung</button>
+      <p class="hint">Die App kann dich nicht benachrichtigen, wenn sie geschlossen ist. Für eine echte Benachrichtigung trag den Termin mit „In den Kalender“ in den Kalender deines Handys ein.</p>
+    </div>
+    <div id="remList" role="list"></div>
+    <div id="remFooter">
+      <button id="remCal" type="button" class="btn">📅 Alle offenen in den Kalender</button>
+      <div class="row">
+        <button id="remExport" type="button" class="btn">Exportieren</button>
+        <label class="btn" for="remImportFile">Importieren</label>
+        <input id="remImportFile" type="file" accept="application/json,.json" hidden>
+      </div>
+    </div>
+  </section>
+
+  <!-- Erinnerungen: neu anlegen oder ändern (Vollbild) -->
+  <section id="remEdit" hidden aria-label="Erinnerung bearbeiten">
+    <div id="remEditHead">
+      <button id="remCancel" type="button" class="btn ghost">Abbrechen</button>
+      <h2 id="remEditTitle">Neu</h2>
+      <button id="remSave" type="button" class="btn primary">Speichern</button>
+    </div>
+    <div id="remEditBody">
+      <div id="remTypes" class="chips"></div>
+      <label class="fld">Titel (optional)
+        <input id="remTitle" type="text" maxlength="60" autocomplete="off">
+      </label>
+      <div class="two">
+        <label class="fld">Datum
+          <input id="remDue" type="date">
+        </label>
+        <label class="fld">Uhrzeit (optional)
+          <input id="remTime" type="time">
+        </label>
+      </div>
+      <label class="fld">Wiederholen
+        <select id="remRepeat"></select>
+      </label>
+      <label class="fld">Vorher erinnern
+        <select id="remLead"></select>
+      </label>
+      <label class="fld">Notiz
+        <textarea id="remNote" rows="3" maxlength="300" placeholder="z. B. Impfpass mitnehmen"></textarea>
+      </label>
+      <div id="remEditActions" hidden>
+        <button id="remDone" type="button" class="btn primary">✓ Erledigt</button>
+        <button id="remReopen" type="button" class="btn" hidden>↩ Wieder öffnen</button>
+        <button id="remIcs" type="button" class="btn">📅 In den Kalender</button>
+        <button id="remDel" type="button" class="btn danger">🗑 Löschen</button>
+      </div>
+    </div>
   </section>
 
   <!-- Gassi-Protokoll (Vollbild) -->
