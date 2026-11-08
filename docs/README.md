@@ -7,7 +7,7 @@ der Karte gespeichert, bleiben auf dem Gerät und lassen sich filtern, exportier
 ## Lokal ausprobieren
 
 ```
-cd hunderoute
+cd docs
 python3 -m http.server 8000
 ```
 
@@ -17,7 +17,7 @@ Dann `http://localhost:8000` im Browser öffnen (am besten in der Handy-Ansicht)
 
 Die App muss über **HTTPS** erreichbar sein, sonst funktionieren Standort und
 "Zum Startbildschirm hinzufügen" nicht. Einfachster Weg: GitHub Pages
-(Repository-Einstellungen, Pages, Branch und Ordner wählen).
+(Repository-Einstellungen, Pages, Branch `main`, Ordner `/docs`).
 
 ## Aufbau
 
