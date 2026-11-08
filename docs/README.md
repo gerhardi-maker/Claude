@@ -15,7 +15,9 @@ Uhrzeit, Wiederholung (z. B. jedes Jahr) und Vorlaufzeit. Ein roter Punkt am But
 Überfälliges, beim Start der App kommt ein Hinweis. Wer eine Erinnerung als erledigt abhakt, bekommt bei
 wiederkehrenden Terminen automatisch den nächsten. Die App kann nicht benachrichtigen, wenn sie geschlossen
 ist (dafür bräuchte es einen Server). Deshalb lässt sich jeder Termin als Kalenderdatei (.ics) mit Wecker an den
-Handy-Kalender übergeben.
+Handy-Kalender übergeben. Auf dem iPhone liefert die App die Datei dafür über den Service Worker unter einer
+echten Web-Adresse mit dem Typ text/calendar aus, weil Safari im Browser erzeugte Dateien nur anzeigt und nicht an
+den Kalender übergibt. Als zweiter Weg ohne Datei gibt es „In Google Kalender“.
 Zu jedem Ort kann ein Foto gehören. Es wird beim Aufnehmen auf maximal 1280 Pixel verkleinert
 und in IndexedDB gespeichert (nicht in localStorage, dafür sind Fotos zu groß). Der Export
 enthält die Fotos, der Import stellt sie wieder her.
