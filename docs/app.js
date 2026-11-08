@@ -298,8 +298,11 @@
     return box;
   }
 
+  var markersById = {};   // Ort-ID -> Marker (für die Suche)
+
   function render() {
     markerLayer.clearLayers();
+    markersById = {};
     places.forEach(function (p) {
       if (activeFilter.indexOf(p.type) === -1) return;
       var marker = L.marker([p.lat, p.lng], { icon: makeIcon(p.type), title: p.name || TYPES[p.type].label })
@@ -312,6 +315,7 @@
       // neu bauen, und das Foto-Laden würde wieder update() auslösen (Endlosschleife).
       marker.on('popupopen', function (e) { e.popup.setContent(popupFor(p)); });
       marker.addTo(markerLayer);
+      markersById[p.id] = marker;
     });
     $('countInfo').textContent = places.length + (places.length === 1 ? ' Ort gespeichert.' : ' Orte gespeichert.');
   }
@@ -471,6 +475,137 @@
     } else {
       toast('Gespeichert ✓');
     }
+  });
+
+  // ---------- Suche ----------
+  // Ohne Groß-/Kleinschreibung und ohne Umlaut-Unterschiede: "grun" findet "Grün", "strasse" findet "Straße".
+  function norm(s) {
+    return String(s || '').toLowerCase().replace(/ß/g, 'ss')
+      .normalize('NFD').replace(/[̀-ͯ]/g, '');
+  }
+
+  function searchOrigin() { return meMarker ? meMarker.getLatLng() : map.getCenter(); }
+
+  function fmtDist(m) {
+    if (m < 10) return '< 10 m';
+    if (m < 1000) return Math.round(m / 10) * 10 + ' m';
+    return (m / 1000).toFixed(m < 10000 ? 1 : 0).replace('.', ',') + ' km';
+  }
+
+  var SEARCH_LIMIT = 100;
+
+  function runSearch() {
+    var words = norm($('searchInput').value).split(/\s+/).filter(Boolean);
+    var origin = searchOrigin();
+
+    var hits = places.map(function (p) {
+      return { p: p, d: map.distance(origin, [p.lat, p.lng]) };
+    }).filter(function (h) {
+      if (!words.length) return true;
+      var hay = norm(h.p.name + ' ' + h.p.note + ' ' + TYPES[h.p.type].label);
+      return words.every(function (w) { return hay.indexOf(w) !== -1; });
+    }).sort(function (a, b) { return a.d - b.d; });
+
+    var info = $('searchInfo');
+    var list = $('searchList');
+    list.textContent = '';
+
+    if (!places.length) {
+      info.textContent = '';
+    } else {
+      var count = words.length ? hits.length + ' Treffer' : places.length + (places.length === 1 ? ' Ort' : ' Orte');
+      info.textContent = count + ', nach Entfernung von ' + (meMarker ? 'deinem Standort' : 'der Kartenmitte') +
+        (hits.length > SEARCH_LIMIT ? ' (die ersten ' + SEARCH_LIMIT + ')' : '') + '.';
+    }
+
+    if (!hits.length) {
+      var empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = places.length
+        ? 'Nichts gefunden. Probier einen anderen Begriff.'
+        : 'Noch keine Orte gespeichert. Lege den ersten mit dem ＋ an.';
+      list.appendChild(empty);
+      return;
+    }
+
+    hits.slice(0, SEARCH_LIMIT).forEach(function (h) {
+      var p = h.p, t = TYPES[p.type];
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'result';
+      b.setAttribute('role', 'listitem');
+
+      var ico = document.createElement('div');
+      ico.className = 'ico';
+      ico.style.background = t.color;
+      ico.textContent = t.emoji;
+      b.appendChild(ico);
+
+      var txt = document.createElement('div');
+      txt.className = 'txt';
+      var nm = document.createElement('div');
+      nm.className = 'nm';
+      nm.textContent = p.name || t.label;
+      var sub = document.createElement('div');
+      sub.className = 'sub';
+      var parts = [t.label];
+      if (p.note) parts.push(p.note.replace(/\s+/g, ' '));
+      if (p.photo) parts.push('📷');
+      sub.textContent = parts.join(' · ');
+      txt.appendChild(nm);
+      txt.appendChild(sub);
+      b.appendChild(txt);
+
+      var dist = document.createElement('div');
+      dist.className = 'dist';
+      dist.textContent = fmtDist(h.d);
+      b.appendChild(dist);
+
+      b.addEventListener('click', function () { goToPlace(p); });
+      list.appendChild(b);
+    });
+  }
+
+  function goToPlace(p) {
+    // Ist der Typ ausgefiltert, wieder einschalten, sonst gäbe es keinen Marker zum Anzeigen.
+    if (activeFilter.indexOf(p.type) === -1) {
+      activeFilter.push(p.type);
+      save(KEY_FILTER, activeFilter);
+      renderFilters();
+      render();
+    }
+    closeSearch();
+    map.closePopup();
+    map.setView([p.lat, p.lng], Math.max(map.getZoom(), 17), { animate: false });
+    var m = markersById[p.id];
+    if (m) m.openPopup();
+  }
+
+  function openSearch() {
+    closeAdd();
+    $('menuSheet').hidden = true;
+    $('toast').hidden = true;
+    map.closePopup();
+    $('searchInput').value = '';
+    $('searchView').hidden = false;
+    runSearch();
+    // Sofort fokussieren (nicht per Timeout): Nur direkt beim Tippen öffnet iOS die Tastatur.
+    $('searchInput').focus();
+  }
+
+  function closeSearch() {
+    $('searchView').hidden = true;
+    $('searchInput').blur();
+  }
+
+  $('searchBtn').addEventListener('click', openSearch);
+  $('searchClose').addEventListener('click', closeSearch);
+  $('searchInput').addEventListener('input', runSearch);
+  $('searchInput').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') e.target.blur();   // Tastatur einklappen, damit man die ganze Liste sieht
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !$('searchView').hidden) closeSearch();
   });
 
   // ---------- Menü ----------

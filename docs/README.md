@@ -3,6 +3,8 @@
 Eine kleine Handy-App (PWA) für hundefreundliche Orte: Freilaufflächen, Leinenpflicht,
 Wasserstellen, Kotbeutelspender, Hundeverbot und Gefahrenstellen. Eigene Orte werden auf
 der Karte gespeichert, bleiben auf dem Gerät und lassen sich filtern, exportieren und importieren.
+Die Suche (🔍 oben) durchsucht Name, Notiz und Ortstyp. Sie ignoriert Groß-/Kleinschreibung und
+Umlaute, versteht mehrere Wörter (alle müssen passen) und sortiert nach Entfernung.
 Zu jedem Ort kann ein Foto gehören. Es wird beim Aufnehmen auf maximal 1280 Pixel verkleinert
 und in IndexedDB gespeichert (nicht in localStorage, dafür sind Fotos zu groß). Der Export
 enthält die Fotos, der Import stellt sie wieder her.

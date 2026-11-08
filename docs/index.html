@@ -18,6 +18,7 @@
 
   <header id="topbar">
     <button id="menuBtn" class="round" aria-label="Menü">⋯</button>
+    <button id="searchBtn" class="round" aria-label="Orte suchen">🔍</button>
     <div id="filters" role="group" aria-label="Filter"></div>
   </header>
 
@@ -61,6 +62,16 @@
     <input id="importFile" type="file" accept="application/json,.json" hidden>
     <button id="clearBtn" class="btn danger">Alle Orte löschen</button>
     <button id="closeMenu" class="btn ghost">Schließen</button>
+  </section>
+
+  <!-- Suche (Vollbild, damit die Tastatur das Eingabefeld nicht verdeckt) -->
+  <section id="searchView" hidden aria-label="Suche">
+    <div id="searchHead">
+      <input id="searchInput" type="search" placeholder="Name, Notiz oder Typ suchen" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-label="Suchbegriff">
+      <button id="searchClose" type="button" class="btn ghost">Fertig</button>
+    </div>
+    <p id="searchInfo" class="hint"></p>
+    <div id="searchList" role="list"></div>
   </section>
 
   <!-- Foto im Marker-Fenster hinzufügen/ersetzen -->
