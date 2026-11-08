@@ -13,6 +13,7 @@
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+[hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }
 body {
   font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -99,6 +100,28 @@ body {
 .btn.danger { color: var(--danger); }
 .btn.ghost { background: transparent; }
 
+/* Foto beim Hinzufügen */
+.photo-row { display: flex; gap: 10px; align-items: center; }
+.photo-row .btn { flex: 1; margin-top: 8px; min-height: 44px; }
+#photoPreview { position: relative; flex: none; margin-top: 8px; }
+#photoThumb { display: block; width: 56px; height: 56px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); }
+#photoRemove {
+  position: absolute; top: -8px; right: -8px; width: 26px; height: 26px;
+  border-radius: 50%; border: 0; background: #222; color: #fff; font-size: 13px; cursor: pointer;
+}
+
+/* Foto groß */
+#photoView {
+  position: fixed; inset: 0; z-index: 1300; background: rgba(0, 0, 0, .92);
+  display: flex; align-items: center; justify-content: center; cursor: zoom-out;
+}
+#viewerImg { max-width: 100%; max-height: 100%; object-fit: contain; }
+#viewerClose {
+  position: absolute; right: 14px; top: calc(14px + env(safe-area-inset-top));
+  width: 44px; height: 44px; border-radius: 50%; border: 0;
+  background: rgba(255, 255, 255, .2); color: #fff; font-size: 20px; cursor: pointer;
+}
+
 /* Kartenmarker */
 .pin {
   width: 38px; height: 38px; border-radius: 50% 50% 50% 0;
@@ -114,12 +137,16 @@ body {
 .pop-type { font-size: 12px; color: #5d6b63; text-transform: uppercase; letter-spacing: .04em; }
 .pop-name { font-weight: 700; font-size: 16px; margin: 2px 0 4px; }
 .pop-note { margin: 0 0 8px; white-space: pre-wrap; }
+.pop-photo {
+  display: block; width: 100%; height: 150px; object-fit: cover; background: #e3e9e5;
+  border-radius: 8px; margin: 6px 0 8px; cursor: zoom-in;
+}
 .pop-actions { display: flex; gap: 8px; }
 .pop-actions button {
-  flex: 1; min-height: 40px; border-radius: 10px; border: 1px solid #dfe6e1;
-  background: #fff; font: inherit; font-size: 14px; cursor: pointer;
+  flex: 1; min-height: 40px; padding: 0 6px; border-radius: 10px; border: 1px solid #dfe6e1;
+  background: #fff; font: inherit; font-size: 13px; cursor: pointer;
 }
-.pop-actions .del { color: #c0392b; }
+.pop-actions .del { color: #c0392b; flex: 0 0 46px; font-size: 16px; }
 
 #toast {
   position: fixed; z-index: 1200; left: 50%; transform: translateX(-50%);
@@ -128,5 +155,5 @@ body {
   font-size: 14px; max-width: 86vw; text-align: center;
 }
 
-/* Leaflet-Zoom-Buttons hinter die Filterleiste schieben */
-.leaflet-top.leaflet-left { top: calc(64px + env(safe-area-inset-top)); }
+/* Zoom-Buttons unten links, über der Handy-Home-Leiste */
+.leaflet-bottom.leaflet-left { margin-bottom: calc(10px + env(safe-area-inset-bottom)); }

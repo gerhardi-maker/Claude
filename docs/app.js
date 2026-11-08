@@ -44,7 +44,8 @@
         note: String(p.note || '').slice(0, 300),
         lat: lat,
         lng: lng,
-        created: Number(p.created) || Date.now()
+        created: Number(p.created) || Date.now(),
+        photo: p.photo === true
       });
     });
     return out;
@@ -59,8 +60,10 @@
   var savedView = load(KEY_VIEW, null);
   var start = savedView && isFinite(savedView.lat) ? savedView : { lat: 52.515, lng: 13.50, zoom: 14 };
 
-  var map = L.map('map', { zoomControl: true, attributionControl: true })
+  var map = L.map('map', { zoomControl: false, attributionControl: true })
     .setView([start.lat, start.lng], start.zoom);
+  // Zoom-Buttons unten links, damit sie keine Marker-Fenster überdecken
+  L.control.zoom({ position: 'bottomleft', zoomInTitle: 'Vergrößern', zoomOutTitle: 'Verkleinern' }).addTo(map);
 
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
@@ -74,6 +77,146 @@
     var c = map.getCenter();
     save(KEY_VIEW, { lat: c.lat, lng: c.lng, zoom: map.getZoom() });
   });
+
+  // ---------- Fotos (liegen in IndexedDB, nicht in localStorage) ----------
+  var MAX_SIDE = 1280;       // längste Bildkante in Pixel
+  var JPEG_QUALITY = 0.8;
+  var dbPromise = null;
+
+  function openDb() {
+    if (!dbPromise) {
+      dbPromise = new Promise(function (resolve, reject) {
+        if (!window.indexedDB) { reject(new Error('IndexedDB fehlt')); return; }
+        var req = indexedDB.open('hunderoute', 1);
+        req.onupgradeneeded = function () { req.result.createObjectStore('photos'); };
+        req.onsuccess = function () { resolve(req.result); };
+        req.onerror = function () { reject(req.error); };
+      });
+    }
+    return dbPromise;
+  }
+
+  function withStore(mode, fn) {
+    return openDb().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var t = db.transaction('photos', mode);
+        var req = fn(t.objectStore('photos'));
+        t.oncomplete = function () { resolve(req ? req.result : undefined); };
+        t.onerror = t.onabort = function () { reject(t.error); };
+      });
+    });
+  }
+
+  function readBlob(blob, as) {
+    return new Promise(function (resolve, reject) {
+      var r = new FileReader();
+      r.onload = function () { resolve(r.result); };
+      r.onerror = function () { reject(r.error); };
+      if (as === 'url') r.readAsDataURL(blob); else r.readAsArrayBuffer(blob);
+    });
+  }
+
+  // Als ArrayBuffer speichern, das ist auf iPhones zuverlässiger als ein Blob.
+  function putPhoto(id, blob) {
+    return readBlob(blob, 'buf').then(function (buf) {
+      return withStore('readwrite', function (s) {
+        return s.put({ type: blob.type || 'image/jpeg', data: buf }, id);
+      });
+    });
+  }
+  function getPhoto(id) {
+    return withStore('readonly', function (s) { return s.get(id); }).then(function (rec) {
+      return rec ? new Blob([rec.data], { type: rec.type }) : null;
+    });
+  }
+  function deletePhoto(id) {
+    return withStore('readwrite', function (s) { return s.delete(id); }).catch(function () {});
+  }
+  function clearPhotos() {
+    return withStore('readwrite', function (s) { return s.clear(); }).catch(function () {});
+  }
+
+  // Verkleinert ein Foto und macht ein JPEG daraus (spart Platz).
+  function compressImage(file) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+      img.onload = function () {
+        URL.revokeObjectURL(url);
+        var w = img.naturalWidth, h = img.naturalHeight;
+        if (!w || !h) { reject(new Error('Bild leer')); return; }
+        var scale = Math.min(1, MAX_SIDE / Math.max(w, h));
+        var c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(w * scale));
+        c.height = Math.max(1, Math.round(h * scale));
+        var ctx = c.getContext('2d');
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, c.width, c.height);
+        ctx.drawImage(img, 0, 0, c.width, c.height);
+        c.toBlob(function (b) { if (b) resolve(b); else reject(new Error('Umwandeln fehlgeschlagen')); },
+          'image/jpeg', JPEG_QUALITY);
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('Bild nicht lesbar')); };
+      img.src = url;
+    });
+  }
+
+  // Foto eines Orts in ein <img> laden
+  var openPopup = null;
+  map.on('popupopen', function (e) { openPopup = e.popup; });
+  map.on('popupclose', function () { openPopup = null; });
+  function refreshPopup() { if (openPopup) openPopup.update(); }  // Größe neu berechnen und ins Bild schieben
+
+  function showPhoto(imgEl, id) {
+    getPhoto(id).then(function (blob) {
+      if (!blob) { imgEl.hidden = true; refreshPopup(); return; }
+      var url = URL.createObjectURL(blob);
+      imgEl.onload = function () { URL.revokeObjectURL(url); imgEl.hidden = false; refreshPopup(); };
+      imgEl.src = url;
+    }).catch(function () { imgEl.hidden = true; refreshPopup(); });
+  }
+
+  // Foto im Marker-Fenster hinzufügen oder ersetzen
+  var attachCb = null;
+  function attachPhoto(p, file, imgEl, btn) {
+    compressImage(file).then(function (blob) {
+      return putPhoto(p.id, blob);
+    }).then(function () {
+      p.photo = true;
+      persist();
+      btn.textContent = '📷 Neu';
+      showPhoto(imgEl, p.id);
+      toast('Foto gespeichert ✓');
+    }).catch(function () {
+      toast('Das Foto konnte nicht gespeichert werden.');
+    });
+  }
+  $('photoAttach').addEventListener('change', function (ev) {
+    var file = ev.target.files && ev.target.files[0];
+    ev.target.value = '';
+    if (!file || !attachCb) return;
+    var cb = attachCb;
+    attachCb = null;
+    cb(file);
+  });
+
+  // Großansicht
+  var viewerUrl = null;
+  function openViewer(id) {
+    getPhoto(id).then(function (blob) {
+      if (!blob) return;
+      viewerUrl = URL.createObjectURL(blob);
+      $('viewerImg').src = viewerUrl;
+      $('photoView').hidden = false;
+    }).catch(function () { toast('Das Foto konnte nicht geladen werden.'); });
+  }
+  function closeViewer() {
+    $('photoView').hidden = true;
+    $('viewerImg').removeAttribute('src');
+    if (viewerUrl) { URL.revokeObjectURL(viewerUrl); viewerUrl = null; }
+  }
+  $('photoView').addEventListener('click', closeViewer);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeViewer(); });
 
   function makeIcon(type) {
     var t = TYPES[type];
@@ -101,6 +244,14 @@
     name.textContent = p.name || t.label;
     box.appendChild(name);
 
+    var photo = document.createElement('img');
+    photo.className = 'pop-photo';
+    photo.alt = 'Foto von ' + (p.name || t.label);
+    photo.hidden = !p.photo;   // Platz von Anfang an reservieren, damit das Fenster nicht nachträglich wächst
+    photo.addEventListener('click', function () { openViewer(p.id); });
+    box.appendChild(photo);
+    if (p.photo) showPhoto(photo, p.id);
+
     if (p.note) {
       var note = document.createElement('p');
       note.className = 'pop-note';
@@ -119,11 +270,22 @@
     });
     actions.appendChild(nav);
 
+    var cam = document.createElement('button');
+    cam.textContent = p.photo ? '📷 Neu' : '📷 Foto';
+    cam.addEventListener('click', function () {
+      attachCb = function (file) { attachPhoto(p, file, photo, cam); };
+      $('photoAttach').click();
+    });
+    actions.appendChild(cam);
+
     var del = document.createElement('button');
     del.className = 'del';
-    del.textContent = '🗑 Löschen';
+    del.textContent = '🗑';
+    del.setAttribute('aria-label', 'Ort löschen');
+    del.title = 'Ort löschen';
     del.addEventListener('click', function () {
       if (confirm('Diesen Ort löschen?')) {
+        deletePhoto(p.id);
         places = places.filter(function (x) { return x.id !== p.id; });
         persist();
         render();
@@ -140,9 +302,16 @@
     markerLayer.clearLayers();
     places.forEach(function (p) {
       if (activeFilter.indexOf(p.type) === -1) return;
-      L.marker([p.lat, p.lng], { icon: makeIcon(p.type), title: p.name || TYPES[p.type].label })
-        .bindPopup(function () { return popupFor(p); })
-        .addTo(markerLayer);
+      var marker = L.marker([p.lat, p.lng], { icon: makeIcon(p.type), title: p.name || TYPES[p.type].label })
+        .bindPopup(document.createElement('div'), {
+          minWidth: 230, maxWidth: 270,
+          autoPanPaddingTopLeft: [16, 84],      // nicht unter die Filterleiste schieben
+          autoPanPaddingBottomRight: [16, 96]
+        });
+      // Inhalt genau einmal pro Öffnen bauen. Als Funktion würde popup.update() ihn jedes Mal
+      // neu bauen, und das Foto-Laden würde wieder update() auslösen (Endlosschleife).
+      marker.on('popupopen', function (e) { e.popup.setContent(popupFor(p)); });
+      marker.addTo(markerLayer);
     });
     $('countInfo').textContent = places.length + (places.length === 1 ? ' Ort gespeichert.' : ' Orte gespeichert.');
   }
@@ -213,8 +382,35 @@
 
   function updateSaveState() { $('saveAdd').disabled = !selectedType; }
 
+  // Foto, das gerade im Formular ausgewählt ist (noch nicht gespeichert)
+  var pendingPhoto = null;
+  var pendingUrl = null;
+  function setPendingPhoto(blob) {
+    if (pendingUrl) { URL.revokeObjectURL(pendingUrl); pendingUrl = null; }
+    pendingPhoto = blob;
+    if (blob) {
+      pendingUrl = URL.createObjectURL(blob);
+      $('photoThumb').src = pendingUrl;
+    } else {
+      $('photoThumb').removeAttribute('src');
+    }
+    $('photoPreview').hidden = !blob;
+    $('photoBtn').textContent = blob ? '📷 Ändern' : '📷 Foto hinzufügen';
+  }
+  $('photoBtn').addEventListener('click', function () { $('photoInput').click(); });
+  $('photoRemove').addEventListener('click', function () { setPendingPhoto(null); });
+  $('photoInput').addEventListener('change', function (ev) {
+    var file = ev.target.files && ev.target.files[0];
+    ev.target.value = '';
+    if (!file) return;
+    compressImage(file).then(setPendingPhoto).catch(function () {
+      toast('Das Foto konnte nicht gelesen werden.');
+    });
+  });
+
   function openAdd() {
     $('toast').hidden = true;
+    setPendingPhoto(null);
     selectedType = null;
     $('nameInput').value = '';
     $('noteInput').value = '';
@@ -228,6 +424,7 @@
   }
 
   function closeAdd() {
+    setPendingPhoto(null);
     $('addSheet').hidden = true;
     $('crosshair').hidden = true;
     $('fabs').hidden = false;
@@ -243,15 +440,18 @@
   $('saveAdd').addEventListener('click', function () {
     if (!selectedType) return;
     var ll = pinLatLng();
-    places.push({
+    var blob = pendingPhoto;
+    var place = {
       id: newId(),
       type: selectedType,
       name: $('nameInput').value.trim().slice(0, 60),
       note: $('noteInput').value.trim().slice(0, 300),
       lat: ll.lat,
       lng: ll.lng,
-      created: Date.now()
-    });
+      created: Date.now(),
+      photo: false
+    };
+    places.push(place);
     if (activeFilter.indexOf(selectedType) === -1) {
       activeFilter.push(selectedType);
       save(KEY_FILTER, activeFilter);
@@ -260,7 +460,17 @@
     persist();
     render();
     closeAdd();
-    toast('Gespeichert ✓');
+    if (blob) {
+      putPhoto(place.id, blob).then(function () {
+        place.photo = true;
+        persist();
+        toast('Gespeichert ✓');
+      }).catch(function () {
+        toast('Ort gespeichert, aber das Foto nicht.');
+      });
+    } else {
+      toast('Gespeichert ✓');
+    }
   });
 
   // ---------- Menü ----------
@@ -293,15 +503,25 @@
   });
 
   $('exportBtn').addEventListener('click', function () {
-    var blob = new Blob([JSON.stringify(places, null, 2)], { type: 'application/json' });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement('a');
-    a.href = url;
-    a.download = 'hunderoute-orte.json';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    toast('Export wird vorbereitet …');
+    Promise.all(places.map(function (p) {
+      var item = Object.assign({}, p);
+      if (!p.photo) return item;
+      return getPhoto(p.id)
+        .then(function (blob) { return blob ? readBlob(blob, 'url') : null; })
+        .then(function (data) { if (data) item.photoData = data; return item; })
+        .catch(function () { return item; });
+    })).then(function (items) {
+      var blob = new Blob([JSON.stringify(items, null, 2)], { type: 'application/json' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = 'hunderoute-orte.json';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    });
   });
 
   $('importFile').addEventListener('change', function (ev) {
@@ -310,17 +530,40 @@
     var reader = new FileReader();
     reader.onload = function () {
       try {
-        var incoming = sanitizeList(JSON.parse(reader.result));
+        var raw = JSON.parse(reader.result);
+        // Fotos aus der Datei merken (nur JPEG, mit Größenlimit)
+        var photoById = {};
+        if (Array.isArray(raw)) raw.forEach(function (r) {
+          if (r && r.id && typeof r.photoData === 'string' &&
+              r.photoData.indexOf('data:image/jpeg;base64,') === 0 && r.photoData.length < 4000000) {
+            photoById[String(r.id).slice(0, 40)] = r.photoData;
+          }
+        });
+        var incoming = sanitizeList(raw);
         var known = {};
         places.forEach(function (p) { known[p.id] = true; });
         var added = 0;
+        var withPhoto = [];
         incoming.forEach(function (p) {
-          if (!known[p.id]) { places.push(p); added++; }
+          if (known[p.id]) return;
+          p.photo = false;
+          places.push(p);
+          added++;
+          if (photoById[p.id]) withPhoto.push(p);
         });
         persist();
         render();
         $('menuSheet').hidden = true;
         toast(added + ' Orte importiert');
+        Promise.all(withPhoto.map(function (p) {
+          return fetch(photoById[p.id])
+            .then(function (r) { return r.blob(); })
+            .then(function (b) { return putPhoto(p.id, b); })
+            .then(function () { p.photo = true; })
+            .catch(function () { /* dieses Foto überspringen */ });
+        })).then(function () {
+          if (withPhoto.length) { persist(); render(); }
+        });
       } catch (e) {
         toast('Die Datei konnte nicht gelesen werden.');
       }
@@ -332,6 +575,7 @@
   $('clearBtn').addEventListener('click', function () {
     if (places.length && confirm('Wirklich alle ' + places.length + ' Orte löschen?')) {
       places = [];
+      clearPhotos();
       persist();
       render();
       $('menuSheet').hidden = true;

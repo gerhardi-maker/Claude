@@ -37,6 +37,14 @@
     <div id="typePicker" class="chips"></div>
     <input id="nameInput" type="text" maxlength="60" placeholder="Name (z. B. Wiese am Weiher)" autocomplete="off">
     <textarea id="noteInput" rows="2" maxlength="300" placeholder="Notiz (optional)"></textarea>
+    <div class="photo-row">
+      <button id="photoBtn" type="button" class="btn">📷 Foto hinzufügen</button>
+      <div id="photoPreview" hidden>
+        <img id="photoThumb" alt="Vorschau">
+        <button id="photoRemove" type="button" aria-label="Foto entfernen">✕</button>
+      </div>
+    </div>
+    <input id="photoInput" type="file" accept="image/*" hidden>
     <div class="row">
       <button id="cancelAdd" class="btn ghost">Abbrechen</button>
       <button id="saveAdd" class="btn primary">Speichern</button>
@@ -48,12 +56,21 @@
     <h2>Hunderoute</h2>
     <p class="hint"><span id="countInfo"></span> Deine Orte liegen nur auf diesem Handy.</p>
     <button id="demoBtn" class="btn">Beispielorte einfügen</button>
-    <button id="exportBtn" class="btn">Orte exportieren (Datei)</button>
+    <button id="exportBtn" class="btn">Orte exportieren (Datei, mit Fotos)</button>
     <label class="btn" for="importFile">Orte importieren</label>
     <input id="importFile" type="file" accept="application/json,.json" hidden>
     <button id="clearBtn" class="btn danger">Alle Orte löschen</button>
     <button id="closeMenu" class="btn ghost">Schließen</button>
   </section>
+
+  <!-- Foto im Marker-Fenster hinzufügen/ersetzen -->
+  <input id="photoAttach" type="file" accept="image/*" hidden>
+
+  <!-- Foto groß ansehen -->
+  <div id="photoView" hidden>
+    <img id="viewerImg" alt="Foto">
+    <button id="viewerClose" type="button" aria-label="Schließen">✕</button>
+  </div>
 
   <div id="toast" role="status" aria-live="polite" hidden></div>
 
