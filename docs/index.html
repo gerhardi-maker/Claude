@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#2e7d4f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Hunderoute">
+  <title>Hunderoute</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="lib/leaflet.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="map" aria-label="Karte"></div>
+
+  <header id="topbar">
+    <button id="menuBtn" class="round" aria-label="Menü">⋯</button>
+    <div id="filters" role="group" aria-label="Filter"></div>
+  </header>
+
+  <div id="crosshair" hidden aria-hidden="true">
+    <svg viewBox="0 0 24 24" width="44" height="44"><path d="M12 22s7-6.2 7-12a7 7 0 1 0-14 0c0 5.8 7 12 7 12z" fill="#2e7d4f" stroke="#fff" stroke-width="1.5"/><circle cx="12" cy="10" r="2.6" fill="#fff"/></svg>
+  </div>
+
+  <div id="fabs">
+    <button id="locateBtn" class="round" aria-label="Mein Standort">📍</button>
+    <button id="addBtn" class="round fab" aria-label="Ort hinzufügen">＋</button>
+  </div>
+
+  <!-- Ort hinzufügen -->
+  <section id="addSheet" class="sheet" hidden>
+    <h2>Neuer Ort</h2>
+    <p class="hint">Schieb die Karte, bis die Nadel genau auf dem Ort steht.</p>
+    <div id="typePicker" class="chips"></div>
+    <input id="nameInput" type="text" maxlength="60" placeholder="Name (z. B. Wiese am Weiher)" autocomplete="off">
+    <textarea id="noteInput" rows="2" maxlength="300" placeholder="Notiz (optional)"></textarea>
+    <div class="row">
+      <button id="cancelAdd" class="btn ghost">Abbrechen</button>
+      <button id="saveAdd" class="btn primary">Speichern</button>
+    </div>
+  </section>
+
+  <!-- Menü -->
+  <section id="menuSheet" class="sheet" hidden>
+    <h2>Hunderoute</h2>
+    <p class="hint"><span id="countInfo"></span> Deine Orte liegen nur auf diesem Handy.</p>
+    <button id="demoBtn" class="btn">Beispielorte einfügen</button>
+    <button id="exportBtn" class="btn">Orte exportieren (Datei)</button>
+    <label class="btn" for="importFile">Orte importieren</label>
+    <input id="importFile" type="file" accept="application/json,.json" hidden>
+    <button id="clearBtn" class="btn danger">Alle Orte löschen</button>
+    <button id="closeMenu" class="btn ghost">Schließen</button>
+  </section>
+
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="lib/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
