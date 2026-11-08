@@ -131,6 +131,62 @@ body {
 .result .dist { flex: none; font-size: 13px; color: var(--muted); }
 .empty { padding: 28px 16px; text-align: center; color: var(--muted); }
 
+/* Gassi-Protokoll (Vollbild) */
+#walkView {
+  position: fixed; inset: 0; z-index: 1400; background: var(--bg); color: var(--text);
+  display: flex; flex-direction: column;
+  padding-top: env(safe-area-inset-top);
+}
+#walkHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 12px 0 16px; }
+#walkHead h2 { margin: 0; font-size: 22px; }
+#walkHead .btn { width: auto; margin: 0; min-height: 46px; }
+#walkStats { padding: 8px 16px 0; font-size: 14px; color: var(--muted); }
+#walkStats div + div { margin-top: 2px; }
+#walkStartBox { padding: 8px 16px 12px; border-bottom: 1px solid var(--line); }
+#walkStartBox .btn { font-size: 18px; min-height: 56px; }
+#walkStartBox .btn:disabled { opacity: .55; }
+#walkStartBox .hint { margin: 8px 0 0; }
+#walkList { flex: 1; overflow-y: auto; padding-bottom: calc(12px + env(safe-area-inset-bottom)); -webkit-overflow-scrolling: touch; }
+.walk-item {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  min-height: 64px; padding: 10px 16px; border: 0; border-bottom: 1px solid var(--line);
+  background: transparent; color: var(--text); font: inherit; cursor: pointer;
+}
+.walk-item:active { background: color-mix(in srgb, var(--green) 12%, var(--bg)); }
+.walk-item .ico { flex: none; width: 40px; height: 40px; border-radius: 50%; background: var(--green); display: flex; align-items: center; justify-content: center; font-size: 20px; }
+.walk-item .txt { flex: 1; min-width: 0; }
+.walk-item .nm { font-weight: 600; }
+.walk-item .sub { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.walk-item .go { flex: none; color: var(--muted); font-size: 20px; }
+
+/* Anzeige während des Spaziergangs */
+#walkPanel {
+  position: fixed; z-index: 1000; left: 12px; right: 84px;
+  bottom: calc(28px + env(safe-area-inset-bottom));   /* über der Karten-Quellenangabe, die lesbar bleiben muss */
+  background: var(--bg); color: var(--text); border-radius: 16px; box-shadow: var(--shadow);
+  padding: 10px 12px 12px;
+}
+.wp-title { font-size: 13px; color: var(--muted); font-weight: 600; }
+.wp-stats { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin: 2px 0 8px; }
+#walkTime { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
+#walkDist { font-size: 15px; color: var(--muted); text-align: right; }
+.wp-row { display: flex; gap: 8px; }
+.wp-row .btn { margin: 0; flex: 1; min-height: 46px; padding: 0 6px; font-size: 15px; }
+#walkBtn.on { background: var(--green); color: #fff; }
+body.walking .leaflet-bottom.leaflet-left { margin-bottom: calc(164px + env(safe-area-inset-bottom)); }
+body.walking #toast { bottom: calc(194px + env(safe-area-inset-bottom)); }
+
+.count-row { display: flex; gap: 12px; margin: 8px 0 0; }
+.count-row label { flex: 1; display: flex; align-items: center; gap: 8px; font-size: 20px; }
+.count-row input {
+  flex: 1; min-width: 0; font: inherit; font-size: 16px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--text);
+}
+#walkEndSheet textarea, #walkSheet textarea {
+  width: 100%; font: inherit; padding: 12px; margin-top: 8px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--text);
+}
+
 /* Foto beim Hinzufügen */
 .photo-row { display: flex; gap: 10px; align-items: center; }
 .photo-row .btn { flex: 1; margin-top: 8px; min-height: 44px; }
