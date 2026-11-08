@@ -18,6 +18,7 @@
 
   <header id="topbar">
     <button id="menuBtn" class="round" aria-label="Menü">⋯</button>
+    <button id="searchBtn" class="round" aria-label="Orte suchen">🔍</button>
     <div id="filters" role="group" aria-label="Filter"></div>
   </header>
 
@@ -26,9 +27,48 @@
   </div>
 
   <div id="fabs">
+    <button id="walkBtn" class="round" aria-label="Gassi-Protokoll">🐾</button>
     <button id="locateBtn" class="round" aria-label="Mein Standort">📍</button>
     <button id="addBtn" class="round fab" aria-label="Ort hinzufügen">＋</button>
   </div>
+
+  <!-- Anzeige während eines Spaziergangs -->
+  <section id="walkPanel" hidden aria-label="Spaziergang läuft">
+    <div class="wp-title">🦮 Spaziergang läuft</div>
+    <div class="wp-stats"><span id="walkTime">0:00</span><span id="walkDist">GPS wird gesucht …</span></div>
+    <div class="wp-row">
+      <button id="pooBtn" type="button" class="btn" aria-label="Häufchen zählen">💩 0</button>
+      <button id="peeBtn" type="button" class="btn" aria-label="Pfütze zählen">💧 0</button>
+      <button id="walkStop" type="button" class="btn primary">Beenden</button>
+    </div>
+  </section>
+
+  <!-- Spaziergang beenden -->
+  <section id="walkEndSheet" class="sheet" hidden>
+    <h2>Spaziergang beenden?</h2>
+    <p id="walkEndStats" class="hint"></p>
+    <div class="count-row">
+      <label>💩 <input id="endPoo" type="number" inputmode="numeric" min="0" max="99"></label>
+      <label>💧 <input id="endPee" type="number" inputmode="numeric" min="0" max="99"></label>
+    </div>
+    <textarea id="endNote" rows="2" maxlength="300" placeholder="Notiz (optional), z. B. Wetter oder wie es lief"></textarea>
+    <div class="row">
+      <button id="endContinue" type="button" class="btn ghost">Weiter laufen</button>
+      <button id="endSave" type="button" class="btn primary">Speichern</button>
+    </div>
+    <button id="endDiscard" type="button" class="btn danger">Verwerfen</button>
+  </section>
+
+  <!-- Einzelner Spaziergang (Route wird auf der Karte gezeigt) -->
+  <section id="walkSheet" class="sheet" hidden>
+    <h2 id="walkSheetTitle"></h2>
+    <p id="walkSheetStats" class="hint"></p>
+    <textarea id="walkNote" rows="2" maxlength="300" placeholder="Notiz"></textarea>
+    <div class="row">
+      <button id="walkDel" type="button" class="btn danger">🗑 Löschen</button>
+      <button id="walkSheetClose" type="button" class="btn primary">Schließen</button>
+    </div>
+  </section>
 
   <!-- Ort hinzufügen -->
   <section id="addSheet" class="sheet" hidden>
@@ -54,13 +94,40 @@
   <!-- Menü -->
   <section id="menuSheet" class="sheet" hidden>
     <h2>Hunderoute</h2>
-    <p class="hint"><span id="countInfo"></span> Deine Orte liegen nur auf diesem Handy.</p>
+    <p class="hint"><span id="countInfo"></span> <span id="walkCountInfo"></span> Deine Daten liegen nur auf diesem Handy.</p>
     <button id="demoBtn" class="btn">Beispielorte einfügen</button>
     <button id="exportBtn" class="btn">Orte exportieren (Datei, mit Fotos)</button>
     <label class="btn" for="importFile">Orte importieren</label>
     <input id="importFile" type="file" accept="application/json,.json" hidden>
+    <button id="walkExportBtn" class="btn">Gassi-Protokoll exportieren (Datei)</button>
+    <label class="btn" for="walkImportFile">Gassi-Protokoll importieren</label>
+    <input id="walkImportFile" type="file" accept="application/json,.json" hidden>
     <button id="clearBtn" class="btn danger">Alle Orte löschen</button>
     <button id="closeMenu" class="btn ghost">Schließen</button>
+  </section>
+
+  <!-- Gassi-Protokoll (Vollbild) -->
+  <section id="walkView" hidden aria-label="Gassi-Protokoll">
+    <div id="walkHead">
+      <h2>🐾 Gassi-Protokoll</h2>
+      <button id="walkViewClose" type="button" class="btn ghost">Fertig</button>
+    </div>
+    <div id="walkStats"></div>
+    <div id="walkStartBox">
+      <button id="walkStart" type="button" class="btn primary">▶ Spaziergang starten</button>
+      <p class="hint">Lass die App während des Spaziergangs geöffnet. Der Bildschirm bleibt dann an, sonst pausiert die Aufzeichnung.</p>
+    </div>
+    <div id="walkList" role="list"></div>
+  </section>
+
+  <!-- Suche (Vollbild, damit die Tastatur das Eingabefeld nicht verdeckt) -->
+  <section id="searchView" hidden aria-label="Suche">
+    <div id="searchHead">
+      <input id="searchInput" type="search" placeholder="Name, Notiz oder Typ suchen" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-label="Suchbegriff">
+      <button id="searchClose" type="button" class="btn ghost">Fertig</button>
+    </div>
+    <p id="searchInfo" class="hint"></p>
+    <div id="searchList" role="list"></div>
   </section>
 
   <!-- Foto im Marker-Fenster hinzufügen/ersetzen -->

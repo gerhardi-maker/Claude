@@ -298,8 +298,11 @@
     return box;
   }
 
+  var markersById = {};   // Ort-ID -> Marker (für die Suche)
+
   function render() {
     markerLayer.clearLayers();
+    markersById = {};
     places.forEach(function (p) {
       if (activeFilter.indexOf(p.type) === -1) return;
       var marker = L.marker([p.lat, p.lng], { icon: makeIcon(p.type), title: p.name || TYPES[p.type].label })
@@ -310,8 +313,13 @@
         });
       // Inhalt genau einmal pro Öffnen bauen. Als Funktion würde popup.update() ihn jedes Mal
       // neu bauen, und das Foto-Laden würde wieder update() auslösen (Endlosschleife).
-      marker.on('popupopen', function (e) { e.popup.setContent(popupFor(p)); });
+      marker.on('popupopen', function (e) {
+        // Läuft ein Spaziergang, verdeckt die Anzeige unten einen Teil der Karte.
+        e.popup.options.autoPanPaddingBottomRight = L.point(16, document.body.classList.contains('walking') ? 190 : 96);
+        e.popup.setContent(popupFor(p));
+      });
       marker.addTo(markerLayer);
+      markersById[p.id] = marker;
     });
     $('countInfo').textContent = places.length + (places.length === 1 ? ' Ort gespeichert.' : ' Orte gespeichert.');
   }
@@ -340,6 +348,14 @@
   }
 
   // ---------- Standort ----------
+  // Blauer Punkt für die eigene Position
+  function setMe(ll) {
+    if (meMarker) meMarker.setLatLng(ll);
+    else meMarker = L.circleMarker(ll, {
+      radius: 9, color: '#fff', weight: 3, fillColor: '#1a73e8', fillOpacity: 1
+    }).addTo(map);
+  }
+
   function locate(userInitiated) {
     if (!navigator.geolocation) {
       if (userInitiated) toast('Standort wird von diesem Gerät nicht unterstützt.');
@@ -347,16 +363,16 @@
     }
     navigator.geolocation.getCurrentPosition(function (pos) {
       var ll = [pos.coords.latitude, pos.coords.longitude];
-      if (meMarker) meMarker.setLatLng(ll);
-      else meMarker = L.circleMarker(ll, {
-        radius: 9, color: '#fff', weight: 3, fillColor: '#1a73e8', fillOpacity: 1
-      }).addTo(map);
+      setMe(ll);
       map.setView(ll, Math.max(map.getZoom(), 16));
     }, function () {
       if (userInitiated) toast('Standort nicht verfügbar. Bitte in den Einstellungen erlauben.');
     }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 });
   }
-  $('locateBtn').addEventListener('click', function () { locate(true); });
+  // Während eines Spaziergangs folgt die Karte dem Läufer, bis man sie selbst verschiebt.
+  var followMe = false;
+  map.on('dragstart', function () { followMe = false; });
+  $('locateBtn').addEventListener('click', function () { followMe = true; locate(true); });
 
   // ---------- Ort hinzufügen ----------
   var selectedType = null;
@@ -473,6 +489,599 @@
     }
   });
 
+  // ---------- Suche ----------
+  // Ohne Groß-/Kleinschreibung und ohne Umlaut-Unterschiede: "grun" findet "Grün", "strasse" findet "Straße".
+  function norm(s) {
+    return String(s || '').toLowerCase().replace(/ß/g, 'ss')
+      .normalize('NFD').replace(/[̀-ͯ]/g, '');
+  }
+
+  function searchOrigin() { return meMarker ? meMarker.getLatLng() : map.getCenter(); }
+
+  function fmtDist(m) {
+    if (m < 10) return '< 10 m';
+    if (m < 1000) return Math.round(m / 10) * 10 + ' m';
+    return (m / 1000).toFixed(m < 10000 ? 1 : 0).replace('.', ',') + ' km';
+  }
+
+  var SEARCH_LIMIT = 100;
+
+  function runSearch() {
+    var words = norm($('searchInput').value).split(/\s+/).filter(Boolean);
+    var origin = searchOrigin();
+
+    var hits = places.map(function (p) {
+      return { p: p, d: map.distance(origin, [p.lat, p.lng]) };
+    }).filter(function (h) {
+      if (!words.length) return true;
+      var hay = norm(h.p.name + ' ' + h.p.note + ' ' + TYPES[h.p.type].label);
+      return words.every(function (w) { return hay.indexOf(w) !== -1; });
+    }).sort(function (a, b) { return a.d - b.d; });
+
+    var info = $('searchInfo');
+    var list = $('searchList');
+    list.textContent = '';
+
+    if (!places.length) {
+      info.textContent = '';
+    } else {
+      var count = words.length ? hits.length + ' Treffer' : places.length + (places.length === 1 ? ' Ort' : ' Orte');
+      info.textContent = count + ', nach Entfernung von ' + (meMarker ? 'deinem Standort' : 'der Kartenmitte') +
+        (hits.length > SEARCH_LIMIT ? ' (die ersten ' + SEARCH_LIMIT + ')' : '') + '.';
+    }
+
+    if (!hits.length) {
+      var empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = places.length
+        ? 'Nichts gefunden. Probier einen anderen Begriff.'
+        : 'Noch keine Orte gespeichert. Lege den ersten mit dem ＋ an.';
+      list.appendChild(empty);
+      return;
+    }
+
+    hits.slice(0, SEARCH_LIMIT).forEach(function (h) {
+      var p = h.p, t = TYPES[p.type];
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'result';
+      b.setAttribute('role', 'listitem');
+
+      var ico = document.createElement('div');
+      ico.className = 'ico';
+      ico.style.background = t.color;
+      ico.textContent = t.emoji;
+      b.appendChild(ico);
+
+      var txt = document.createElement('div');
+      txt.className = 'txt';
+      var nm = document.createElement('div');
+      nm.className = 'nm';
+      nm.textContent = p.name || t.label;
+      var sub = document.createElement('div');
+      sub.className = 'sub';
+      var parts = [t.label];
+      if (p.note) parts.push(p.note.replace(/\s+/g, ' '));
+      if (p.photo) parts.push('📷');
+      sub.textContent = parts.join(' · ');
+      txt.appendChild(nm);
+      txt.appendChild(sub);
+      b.appendChild(txt);
+
+      var dist = document.createElement('div');
+      dist.className = 'dist';
+      dist.textContent = fmtDist(h.d);
+      b.appendChild(dist);
+
+      b.addEventListener('click', function () { goToPlace(p); });
+      list.appendChild(b);
+    });
+  }
+
+  function goToPlace(p) {
+    // Ist der Typ ausgefiltert, wieder einschalten, sonst gäbe es keinen Marker zum Anzeigen.
+    if (activeFilter.indexOf(p.type) === -1) {
+      activeFilter.push(p.type);
+      save(KEY_FILTER, activeFilter);
+      renderFilters();
+      render();
+    }
+    closeSearch();
+    map.closePopup();
+    map.setView([p.lat, p.lng], Math.max(map.getZoom(), 17), { animate: false });
+    var m = markersById[p.id];
+    if (m) m.openPopup();
+  }
+
+  function openSearch() {
+    closeAdd();
+    $('menuSheet').hidden = true;
+    $('toast').hidden = true;
+    map.closePopup();
+    $('searchInput').value = '';
+    $('searchView').hidden = false;
+    runSearch();
+    // Sofort fokussieren (nicht per Timeout): Nur direkt beim Tippen öffnet iOS die Tastatur.
+    $('searchInput').focus();
+  }
+
+  function closeSearch() {
+    $('searchView').hidden = true;
+    $('searchInput').blur();
+  }
+
+  $('searchBtn').addEventListener('click', openSearch);
+  $('searchClose').addEventListener('click', closeSearch);
+  $('searchInput').addEventListener('input', runSearch);
+  $('searchInput').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') e.target.blur();   // Tastatur einklappen, damit man die ganze Liste sieht
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !$('searchView').hidden) closeSearch();
+  });
+
+  // ---------- Gassi-Protokoll ----------
+  var KEY_WALKS = 'hunderoute.walks.v1';
+  var KEY_ACTIVE = 'hunderoute.walk.active.v1';   // laufender Spaziergang (übersteht ein Neuladen)
+  var STALE_MS = 3 * 60 * 60 * 1000;              // so lange ohne Lebenszeichen: Spaziergang gilt als vergessen
+  var MAX_ACCURACY = 40;                          // Meter, ungenauere GPS-Punkte werden ignoriert
+  var MIN_STEP = 8;                               // Meter, kleinere Bewegungen gelten als GPS-Rauschen
+  var MAX_SAVED_POINTS = 1500;                    // längere Routen werden beim Speichern ausgedünnt
+
+  var walks = sanitizeWalks(load(KEY_WALKS, []));
+  var walk = null;                                // laufender Spaziergang: {id, start, points:[[lat,lng,t]], dist, poo, pee}
+  var watchId = null, tickTimer = null, wakeLock = null, centered = false;
+  var walkLine = null;                            // Linie des laufenden Spaziergangs
+  var viewLayer = L.layerGroup().addTo(map);      // Route eines alten Spaziergangs
+  var openWalkId = null;
+
+  function clampInt(v) {
+    v = Math.round(Number(v));
+    return isFinite(v) ? Math.min(99, Math.max(0, v)) : 0;
+  }
+
+  function sanitizeWalks(list) {
+    if (!Array.isArray(list)) return [];
+    var out = [];
+    list.forEach(function (w) {
+      if (!w) return;
+      var start = Number(w.start), end = Number(w.end);
+      if (!isFinite(start) || !isFinite(end) || end < start) return;
+      var pts = [];
+      if (Array.isArray(w.points)) w.points.slice(0, 3000).forEach(function (q) {
+        if (!Array.isArray(q)) return;
+        var la = Number(q[0]), lo = Number(q[1]);
+        if (isFinite(la) && isFinite(lo) && Math.abs(la) <= 90 && Math.abs(lo) <= 180) pts.push([la, lo]);
+      });
+      out.push({
+        id: String(w.id || newId()).slice(0, 40),
+        start: start,
+        end: end,
+        dist: Math.max(0, Number(w.dist) || 0),
+        poo: clampInt(w.poo),
+        pee: clampInt(w.pee),
+        note: String(w.note || '').slice(0, 300),
+        points: pts
+      });
+    });
+    return out;
+  }
+
+  // Wie save(), meldet aber zurück, ob es geklappt hat (z. B. Speicher voll).
+  function saveChecked(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch (e) { return false; }
+  }
+  function persistWalks() {
+    var ok = saveChecked(KEY_WALKS, walks);
+    updateWalkCount();
+    return ok;
+  }
+  function updateWalkCount() {
+    $('walkCountInfo').textContent = walks.length ? walks.length + (walks.length === 1 ? ' Spaziergang' : ' Spaziergänge') + ' im Protokoll.' : '';
+  }
+
+  // ----- Formate -----
+  function pad2(n) { return n < 10 ? '0' + n : String(n); }
+  function fmtKm(m) { return m < 1000 ? Math.round(m) + ' m' : (m / 1000).toFixed(2).replace('.', ',') + ' km'; }
+  function fmtClock(ms) {
+    var s = Math.max(0, Math.floor(ms / 1000));
+    var h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+    return (h ? h + ':' + pad2(m) : String(m)) + ':' + pad2(x);
+  }
+  function fmtDur(ms) {
+    var m = Math.round(ms / 60000);
+    if (m < 1) return '< 1 Min.';
+    if (m < 60) return m + ' Min.';
+    return Math.floor(m / 60) + ' Std.' + (m % 60 ? ' ' + (m % 60) + ' Min.' : '');
+  }
+  function fmtWalkDate(ts) {
+    var d = new Date(ts);
+    return d.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' }) + ', ' +
+      d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) + ' Uhr';
+  }
+  function walkWord(n) { return n + (n === 1 ? ' Spaziergang' : ' Spaziergänge'); }
+
+  // ----- Bildschirm anlassen (damit die Aufzeichnung nicht pausiert) -----
+  function requestWake() {
+    if (!('wakeLock' in navigator)) return;
+    navigator.wakeLock.request('screen').then(function (l) {
+      wakeLock = l;
+      l.addEventListener('release', function () { if (wakeLock === l) wakeLock = null; });
+    }).catch(function () { /* nicht möglich, dann geht der Bildschirm eben aus */ });
+  }
+  function releaseWake() {
+    if (wakeLock) { wakeLock.release().catch(function () {}); wakeLock = null; }
+  }
+  // Ein Wake Lock endet, wenn die App in den Hintergrund geht. Beim Zurückkommen neu holen.
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible' && walk && !wakeLock) requestWake();
+  });
+
+  // ----- Aufzeichnung -----
+  function startWalk() {
+    if (walk) return;
+    if (!navigator.geolocation) { toast('Standort wird von diesem Gerät nicht unterstützt.'); return; }
+    walk = { id: newId(), start: Date.now(), points: [], dist: 0, poo: 0, pee: 0 };
+    saveChecked(KEY_ACTIVE, walk);
+    followMe = true;
+    beginTracking();
+  }
+
+  function beginTracking() {
+    centered = false;
+    document.body.classList.add('walking');
+    $('walkBtn').classList.add('on');
+    $('walkPanel').hidden = false;
+    walkLine = L.polyline(walk.points.map(function (q) { return [q[0], q[1]]; }),
+      { color: '#1a73e8', weight: 6, opacity: 0.85 }).addTo(map);
+    updatePanel();
+    tickTimer = setInterval(updatePanel, 1000);
+    watchId = navigator.geolocation.watchPosition(onWalkPos, onWalkErr,
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
+    requestWake();
+  }
+
+  function endTracking() {
+    if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
+    if (tickTimer !== null) { clearInterval(tickTimer); tickTimer = null; }
+    releaseWake();
+    if (walkLine) { map.removeLayer(walkLine); walkLine = null; }
+    document.body.classList.remove('walking');
+    $('walkBtn').classList.remove('on');
+    $('walkPanel').hidden = true;
+    try { localStorage.removeItem(KEY_ACTIVE); } catch (e) { /* ignorieren */ }
+    followMe = false;
+  }
+
+  function onWalkPos(pos) {
+    if (!walk) return;
+    var c = pos.coords;
+    var ll = [c.latitude, c.longitude];
+    var t = pos.timestamp || Date.now();
+    setMe(ll);
+    if (followMe && !centered) { centered = true; map.setView(ll, Math.max(map.getZoom(), 16)); }
+    if (c.accuracy > MAX_ACCURACY) return;                       // zu ungenau
+    var last = walk.points[walk.points.length - 1];
+    if (last) {
+      var d = map.distance([last[0], last[1]], ll);
+      var dt = Math.max(1, (t - last[2]) / 1000);
+      if (d < Math.max(MIN_STEP, c.accuracy / 2)) return;        // nur Rauschen
+      if (d > 50 && d / dt > 20) return;                         // GPS-Ausreißer (über 70 km/h)
+      walk.dist += d;
+    }
+    walk.points.push([ll[0], ll[1], t]);
+    walkLine.addLatLng(ll);
+    saveChecked(KEY_ACTIVE, walk);
+    updatePanel();
+    if (followMe) map.panTo(ll);
+  }
+
+  function onWalkErr(err) {
+    // Standort verweigert und noch kein einziger Punkt: dann hat die Aufzeichnung keinen Sinn.
+    if (walk && err && err.code === 1 && !walk.points.length) {
+      endTracking();
+      walk = null;
+      toast('Ohne Standort kann ich keinen Weg aufzeichnen. Bitte erlaube den Standort.');
+    }
+    // Zeitüberschreitungen und kurze Aussetzer ignorieren wir, der nächste Punkt kommt.
+  }
+
+  function updatePanel() {
+    if (!walk) return;
+    $('walkTime').textContent = fmtClock(Date.now() - walk.start);
+    $('walkDist').textContent = walk.points.length ? fmtKm(walk.dist) : 'GPS wird gesucht …';
+    $('pooBtn').textContent = '💩 ' + walk.poo;
+    $('peeBtn').textContent = '💧 ' + walk.pee;
+  }
+
+  $('pooBtn').addEventListener('click', function () {
+    if (!walk) return;
+    walk.poo = clampInt(walk.poo + 1);
+    saveChecked(KEY_ACTIVE, walk);
+    updatePanel();
+  });
+  $('peeBtn').addEventListener('click', function () {
+    if (!walk) return;
+    walk.pee = clampInt(walk.pee + 1);
+    saveChecked(KEY_ACTIVE, walk);
+    updatePanel();
+  });
+
+  // Fertigen Eintrag bauen (Route ausdünnen und Koordinaten auf ca. 1 m runden, spart Platz)
+  function buildRecord(w, endTs, note) {
+    var pts = w.points;
+    if (pts.length > MAX_SAVED_POINTS) {
+      var step = Math.ceil(pts.length / MAX_SAVED_POINTS), thin = [];
+      for (var i = 0; i < pts.length; i += step) thin.push(pts[i]);
+      if (thin[thin.length - 1] !== pts[pts.length - 1]) thin.push(pts[pts.length - 1]);
+      pts = thin;
+    }
+    return {
+      id: w.id,
+      start: w.start,
+      end: Math.max(endTs, w.start),
+      dist: Math.round(w.dist),
+      poo: clampInt(w.poo),
+      pee: clampInt(w.pee),
+      note: String(note || '').slice(0, 300),
+      points: pts.map(function (q) { return [Math.round(q[0] * 1e5) / 1e5, Math.round(q[1] * 1e5) / 1e5]; })
+    };
+  }
+
+  // Speichert einen Eintrag. Ist der Speicher knapp, wird es zumindest ohne Route versucht.
+  function storeWalk(rec) {
+    walks.push(rec);
+    if (persistWalks()) return 'ok';
+    rec.points = [];
+    if (persistWalks()) return 'ohne Route';
+    walks.pop();
+    updateWalkCount();
+    return 'fehler';
+  }
+
+  function toastStored(res) {
+    toast(res === 'ok' ? 'Spaziergang gespeichert ✓'
+      : res === 'ohne Route' ? 'Gespeichert, aber ohne Route (Speicher knapp).'
+      : 'Speicher voll, der Spaziergang konnte nicht gespeichert werden.');
+  }
+
+  // Nach einem Neuladen: laufenden Spaziergang fortsetzen, einen vergessenen abschließen.
+  function restoreWalk() {
+    var d = load(KEY_ACTIVE, null);
+    if (!d || !isFinite(Number(d.start))) return;
+    var pts = [];
+    if (Array.isArray(d.points)) d.points.forEach(function (q) {
+      if (Array.isArray(q) && isFinite(q[0]) && isFinite(q[1]) && isFinite(q[2])) pts.push([+q[0], +q[1], +q[2]]);
+    });
+    walk = { id: String(d.id || newId()).slice(0, 40), start: Number(d.start), points: pts,
+      dist: Math.max(0, Number(d.dist) || 0), poo: clampInt(d.poo), pee: clampInt(d.pee) };
+    var lastT = pts.length ? pts[pts.length - 1][2] : walk.start;
+    if (Date.now() - lastT > STALE_MS) {
+      var w = walk;
+      walk = null;
+      try { localStorage.removeItem(KEY_ACTIVE); } catch (e) { /* ignorieren */ }
+      if (w.points.length >= 2) {
+        toast(storeWalk(buildRecord(w, lastT, '')) === 'fehler'
+          ? 'Ein früherer Spaziergang konnte nicht gespeichert werden.'
+          : 'Ein früherer, nicht beendeter Spaziergang wurde gespeichert.');
+      }
+      return;
+    }
+    followMe = true;
+    beginTracking();
+  }
+
+  // ----- Beenden -----
+  function openEnd() {
+    if (!walk) return;
+    $('walkEndStats').textContent = fmtClock(Date.now() - walk.start) + ' · ' +
+      (walk.points.length ? fmtKm(walk.dist) : 'noch keine Strecke');
+    $('endPoo').value = walk.poo;
+    $('endPee').value = walk.pee;
+    $('endNote').value = '';
+    $('walkPanel').hidden = true;
+    $('walkEndSheet').hidden = false;
+  }
+  function closeEnd() {
+    $('walkEndSheet').hidden = true;
+    if (walk) $('walkPanel').hidden = false;
+  }
+
+  $('walkStop').addEventListener('click', openEnd);
+  $('endContinue').addEventListener('click', closeEnd);
+  $('endDiscard').addEventListener('click', function () {
+    if (!confirm('Diesen Spaziergang verwerfen? Die Aufzeichnung geht verloren.')) return;
+    endTracking();
+    walk = null;
+    $('walkEndSheet').hidden = true;
+    toast('Verworfen');
+  });
+  $('endSave').addEventListener('click', function () {
+    if (!walk) return;
+    walk.poo = clampInt($('endPoo').value);
+    walk.pee = clampInt($('endPee').value);
+    var rec = buildRecord(walk, Date.now(), $('endNote').value.trim());
+    endTracking();
+    walk = null;
+    $('walkEndSheet').hidden = true;
+    toastStored(storeWalk(rec));
+  });
+
+  // ----- Protokoll-Liste -----
+  function openWalkView() {
+    closeAdd();
+    closeSearch();
+    $('menuSheet').hidden = true;
+    $('toast').hidden = true;
+    map.closePopup();
+    renderWalkView();
+    $('walkView').hidden = false;
+  }
+  function closeWalkView() { $('walkView').hidden = true; }
+
+  function renderWalkView() {
+    var sorted = walks.slice().sort(function (a, b) { return b.start - a.start; });
+
+    var weekAgo = Date.now() - 7 * 24 * 3600 * 1000;
+    var week = sorted.filter(function (w) { return w.start >= weekAgo; });
+    var sum = function (list) { return list.reduce(function (s, w) { return s + w.dist; }, 0); };
+    var stats = $('walkStats');
+    stats.textContent = '';
+    [['Letzte 7 Tage: ', week], ['Insgesamt: ', sorted]].forEach(function (row) {
+      var div = document.createElement('div');
+      div.textContent = row[0] + walkWord(row[1].length) + ', ' + fmtKm(sum(row[1]));
+      stats.appendChild(div);
+    });
+
+    var start = $('walkStart');
+    start.disabled = !!walk;
+    start.textContent = walk ? 'Ein Spaziergang läuft gerade' : '▶ Spaziergang starten';
+
+    var list = $('walkList');
+    list.textContent = '';
+    if (!sorted.length) {
+      var empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = 'Noch kein Spaziergang aufgezeichnet. Tipp oben auf „Spaziergang starten“.';
+      list.appendChild(empty);
+      return;
+    }
+    sorted.forEach(function (w) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'walk-item';
+      b.setAttribute('role', 'listitem');
+
+      var ico = document.createElement('div');
+      ico.className = 'ico';
+      ico.textContent = '🦮';
+      b.appendChild(ico);
+
+      var txt = document.createElement('div');
+      txt.className = 'txt';
+      var nm = document.createElement('div');
+      nm.className = 'nm';
+      nm.textContent = fmtWalkDate(w.start);
+      var sub = document.createElement('div');
+      sub.className = 'sub';
+      var parts = [fmtDur(w.end - w.start), fmtKm(w.dist)];
+      if (w.poo) parts.push('💩 ' + w.poo);
+      if (w.pee) parts.push('💧 ' + w.pee);
+      if (w.note) parts.push(w.note.replace(/\s+/g, ' '));
+      sub.textContent = parts.join(' · ');
+      txt.appendChild(nm);
+      txt.appendChild(sub);
+      b.appendChild(txt);
+
+      var go = document.createElement('div');
+      go.className = 'go';
+      go.textContent = '›';
+      b.appendChild(go);
+
+      b.addEventListener('click', function () { showWalk(w); });
+      list.appendChild(b);
+    });
+  }
+
+  // ----- Einzelner Spaziergang auf der Karte -----
+  function showWalk(w) {
+    closeWalkView();
+    openWalkId = w.id;
+    viewLayer.clearLayers();
+    $('walkSheetTitle').textContent = fmtWalkDate(w.start);
+    var info = fmtDur(w.end - w.start) + ' · ' + fmtKm(w.dist);
+    if (w.poo) info += ' · 💩 ' + w.poo;
+    if (w.pee) info += ' · 💧 ' + w.pee;
+    if (w.points.length < 2) info += '. Für diesen Spaziergang gibt es keine Route.';
+    $('walkSheetStats').textContent = info;
+    $('walkNote').value = w.note;
+    $('walkPanel').hidden = true;
+    $('fabs').hidden = true;
+    $('walkSheet').hidden = false;
+    if (w.points.length >= 2) {
+      var line = L.polyline(w.points, { color: '#8e44ad', weight: 6, opacity: 0.9 }).addTo(viewLayer);
+      var first = w.points[0], lastPt = w.points[w.points.length - 1];
+      L.circleMarker(first, { radius: 8, color: '#fff', weight: 3, fillColor: '#2e9e5b', fillOpacity: 1 })
+        .bindTooltip('Start').addTo(viewLayer);
+      L.circleMarker(lastPt, { radius: 8, color: '#fff', weight: 3, fillColor: '#d0453b', fillOpacity: 1 })
+        .bindTooltip('Ziel').addTo(viewLayer);
+      map.fitBounds(line.getBounds(), { paddingTopLeft: [28, 90], paddingBottomRight: [28, 330], maxZoom: 18, animate: false });
+    }
+  }
+
+  function closeWalkSheet(saveNote) {
+    var w = walks.filter(function (x) { return x.id === openWalkId; })[0];
+    if (saveNote && w) {
+      var note = $('walkNote').value.trim().slice(0, 300);
+      if (note !== w.note) {
+        w.note = note;
+        if (!persistWalks()) toast('Speicher voll, die Notiz konnte nicht gespeichert werden.');
+      }
+    }
+    openWalkId = null;
+    viewLayer.clearLayers();
+    $('walkSheet').hidden = true;
+    $('fabs').hidden = false;
+    if (walk) $('walkPanel').hidden = false;
+  }
+
+  $('walkSheetClose').addEventListener('click', function () { closeWalkSheet(true); });
+  $('walkDel').addEventListener('click', function () {
+    if (!confirm('Diesen Spaziergang aus dem Protokoll löschen?')) return;
+    walks = walks.filter(function (x) { return x.id !== openWalkId; });
+    persistWalks();
+    closeWalkSheet(false);
+    toast('Gelöscht');
+  });
+
+  $('walkBtn').addEventListener('click', openWalkView);
+  $('walkViewClose').addEventListener('click', closeWalkView);
+  $('walkStart').addEventListener('click', function () {
+    if (walk) return;
+    closeWalkView();
+    startWalk();
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !$('walkView').hidden) closeWalkView();
+  });
+
+  // ----- Export und Import des Protokolls -----
+  $('walkExportBtn').addEventListener('click', function () {
+    if (!walks.length) { toast('Noch keine Spaziergänge im Protokoll.'); return; }
+    downloadJson('hunderoute-gassi-protokoll.json', { hunderoute: 'walks', version: 1, walks: walks });
+  });
+
+  $('walkImportFile').addEventListener('change', function (ev) {
+    var file = ev.target.files && ev.target.files[0];
+    ev.target.value = '';
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      try {
+        var raw = JSON.parse(reader.result);
+        var incoming = sanitizeWalks(Array.isArray(raw) ? raw : raw && raw.walks);
+        var known = {};
+        walks.forEach(function (w) { known[w.id] = true; });
+        var before = walks.slice();
+        var added = 0;
+        incoming.forEach(function (w) {
+          if (!known[w.id]) { walks.push(w); known[w.id] = true; added++; }
+        });
+        if (added && !persistWalks()) {
+          walks = before;
+          updateWalkCount();
+          toast('Speicher voll, der Import war nicht möglich.');
+          return;
+        }
+        $('menuSheet').hidden = true;
+        toast(added === 1 ? '1 Spaziergang importiert' : added + ' Spaziergänge importiert');
+      } catch (e) {
+        toast('Die Datei konnte nicht gelesen werden.');
+      }
+    };
+    reader.readAsText(file);
+  });
+
   // ---------- Menü ----------
   $('menuBtn').addEventListener('click', function () {
     closeAdd();
@@ -512,17 +1121,21 @@
         .then(function (data) { if (data) item.photoData = data; return item; })
         .catch(function () { return item; });
     })).then(function (items) {
-      var blob = new Blob([JSON.stringify(items, null, 2)], { type: 'application/json' });
-      var url = URL.createObjectURL(blob);
-      var a = document.createElement('a');
-      a.href = url;
-      a.download = 'hunderoute-orte.json';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+      downloadJson('hunderoute-orte.json', items);
     });
   });
+
+  function downloadJson(filename, data) {
+    var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
 
   $('importFile').addEventListener('change', function (ev) {
     var file = ev.target.files && ev.target.files[0];
@@ -596,6 +1209,8 @@
   // ---------- Start ----------
   renderFilters();
   render();
+  updateWalkCount();
+  restoreWalk();
   if (!savedView) locate(false);
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
