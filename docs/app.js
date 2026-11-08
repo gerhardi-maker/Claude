@@ -1082,6 +1082,489 @@
     reader.readAsText(file);
   });
 
+  // ---------- Erinnerungen (Tierarzt, Impfung, ...) ----------
+  var KEY_REM = 'hunderoute.reminders.v1';
+
+  // lead = Tage vorher erinnern, repeat = Monate bis zum nächsten Termin (0 = einmalig)
+  var REM_TYPES = {
+    tierarzt: { emoji: '🩺', label: 'Tierarzt-Termin',        lead: 1, repeat: 0,  ph: 'z. B. Kontrolle bei Dr. Meier' },
+    impfung:  { emoji: '💉', label: 'Impfung',                lead: 7, repeat: 12, ph: 'z. B. Tollwut oder Staupe' },
+    wurm:     { emoji: '💊', label: 'Entwurmung',             lead: 3, repeat: 3,  ph: 'z. B. Wurmkur' },
+    zecke:    { emoji: '🪲', label: 'Zecken- und Flohschutz', lead: 3, repeat: 1,  ph: 'z. B. Spot-on erneuern' },
+    sonst:    { emoji: '📌', label: 'Sonstiges',              lead: 1, repeat: 0,  ph: 'z. B. Hundesteuer zahlen' }
+  };
+  var REM_TYPE_KEYS = Object.keys(REM_TYPES);
+  var REPEATS = [[0, 'Einmalig'], [1, 'Jeden Monat'], [3, 'Alle 3 Monate'], [6, 'Alle 6 Monate'],
+    [12, 'Jedes Jahr'], [24, 'Alle 2 Jahre'], [36, 'Alle 3 Jahre']];
+  var LEADS = [[0, 'Am Tag selbst'], [1, '1 Tag vorher'], [3, '3 Tage vorher'], [7, '1 Woche vorher'], [14, '2 Wochen vorher']];
+
+  var reminders = sanitizeReminders(load(KEY_REM, []));
+  var editingRemId = null;   // null = neue Erinnerung
+  var remType = 'tierarzt';
+
+  function pickOpt(opts, v, dflt) {
+    v = Number(v);
+    return opts.some(function (o) { return o[0] === v; }) ? v : dflt;
+  }
+
+  // ----- Datumsrechnung (Daten als "JJJJ-MM-TT", ohne Zeitzonen-Fallen) -----
+  function isDateStr(s) {
+    if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+    var y = +s.slice(0, 4), m = +s.slice(5, 7), d = +s.slice(8, 10);
+    var t = new Date(Date.UTC(y, m - 1, d));
+    return t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === d;
+  }
+  function isTimeStr(s) { return typeof s === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(s); }
+  function dateStrOf(date) { return date.getFullYear() + '-' + pad2(date.getMonth() + 1) + '-' + pad2(date.getDate()); }
+  function todayStr() { return dateStrOf(new Date()); }
+  function dayNum(s) { return Math.round(Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10)) / 864e5); }
+  function daysFromToday(s) { return dayNum(s) - dayNum(todayStr()); }
+  function addDaysStr(s, n) {
+    return new Date(Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10)) + n * 864e5).toISOString().slice(0, 10);
+  }
+  // Monate dazurechnen, am Monatsende abschneiden (31.01. + 1 Monat = 28.02. bzw. 29.02.)
+  function addMonthsStr(s, n) {
+    var y = +s.slice(0, 4), m = +s.slice(5, 7) - 1 + n, d = +s.slice(8, 10);
+    y += Math.floor(m / 12);
+    m = ((m % 12) + 12) % 12;
+    var last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+    return y + '-' + pad2(m + 1) + '-' + pad2(Math.min(d, last));
+  }
+  function localDate(s) { return new Date(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10)); }
+  function fmtDateLong(s) {
+    return localDate(s).toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' });
+  }
+  function fmtDateShort(s) { return localDate(s).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }); }
+  function relLabel(days) {
+    if (days < -1) return 'seit ' + (-days) + ' Tagen überfällig';
+    if (days === -1) return 'seit gestern überfällig';
+    if (days === 0) return 'heute';
+    if (days === 1) return 'morgen';
+    if (days <= 60) return 'in ' + days + ' Tagen';
+    return 'in ca. ' + Math.round(days / 30.4) + ' Monaten';
+  }
+  function repeatLabel(n) {
+    var o = REPEATS.filter(function (x) { return x[0] === n; })[0];
+    return o ? o[1] : '';
+  }
+
+  function sanitizeReminders(list) {
+    if (!Array.isArray(list)) return [];
+    var out = [];
+    list.forEach(function (r) {
+      if (!r || !isDateStr(r.due)) return;
+      out.push({
+        id: String(r.id || newId()).slice(0, 40),
+        type: REM_TYPES[r.type] ? r.type : 'sonst',
+        title: String(r.title || '').slice(0, 60),
+        due: r.due,
+        time: isTimeStr(r.time) ? r.time : '',
+        repeat: pickOpt(REPEATS, r.repeat, 0),
+        lead: pickOpt(LEADS, r.lead, 1),
+        note: String(r.note || '').slice(0, 300),
+        done: r.done === true,
+        doneAt: isDateStr(r.doneAt) ? r.doneAt : '',
+        next: String(r.next || '').slice(0, 40)
+      });
+    });
+    return out;
+  }
+
+  // Speichert die neue Liste. Klappt das nicht (Speicher voll), bleibt die alte Liste unverändert.
+  function commitReminders(next) {
+    var old = reminders;
+    reminders = next;
+    if (!saveChecked(KEY_REM, reminders)) {
+      reminders = old;
+      toast('Speicher voll, die Erinnerung konnte nicht gespeichert werden.');
+      return false;
+    }
+    updateRemBadge();
+    return true;
+  }
+
+  function byDue(a, b) {
+    if (a.due !== b.due) return a.due < b.due ? -1 : 1;
+    var ta = a.time || '', tb = b.time || '';
+    return ta < tb ? -1 : ta > tb ? 1 : 0;
+  }
+  function remTitle(r) { return r.title || REM_TYPES[r.type].label; }
+  // "Braucht Aufmerksamkeit": überfällig oder innerhalb der Vorlaufzeit
+  function needsAttention(r) { return !r.done && daysFromToday(r.due) <= r.lead; }
+  function attentionList() { return reminders.filter(needsAttention).sort(byDue); }
+
+  function updateRemBadge() {
+    var n = attentionList().length;
+    var el = $('remBadge');
+    el.hidden = n === 0;
+    el.textContent = n > 9 ? '9+' : String(n);
+    $('remBtn').setAttribute('aria-label', n ? 'Erinnerungen, ' + n + ' fällig' : 'Erinnerungen');
+  }
+
+  // Beim Öffnen der App kurz auf Fälliges hinweisen
+  function remindOnStart() {
+    var list = attentionList();
+    if (!list.length) return;
+    var first = list[0];
+    var msg = '🩺 ' + remTitle(first) + ': ' + relLabel(daysFromToday(first.due));
+    if (list.length > 1) msg += ' (+' + (list.length - 1) + ' weitere)';
+    setTimeout(function () { toast(msg); }, $('toast').hidden ? 500 : 3000);
+  }
+
+  // Ein neuer Tag beginnt, während die App offen liegt: Punkt und Liste auffrischen
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState !== 'visible') return;
+    updateRemBadge();
+    if (!$('remView').hidden) renderRemView();
+  });
+
+  // ----- Liste -----
+  function openRemView() {
+    closeAdd();
+    closeSearch();
+    closeWalkView();
+    map.closePopup();
+    $('toast').hidden = true;
+    $('remEdit').hidden = true;
+    renderRemView();
+    $('remView').hidden = false;
+    document.body.classList.add('rem-list');   // Hinweise rutschen über die Schaltflächen unten
+  }
+  function closeRemView() {
+    $('remView').hidden = true;
+    document.body.classList.remove('rem-list');
+  }
+
+  function remItemEl(r) {
+    var days = daysFromToday(r.due);
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'rem-item' + (r.done ? ' done' : days < 0 ? ' late' : needsAttention(r) ? ' soon' : '');
+    b.setAttribute('role', 'listitem');
+
+    var ico = document.createElement('div');
+    ico.className = 'ico';
+    ico.textContent = REM_TYPES[r.type].emoji;
+    b.appendChild(ico);
+
+    var txt = document.createElement('div');
+    txt.className = 'txt';
+    var nm = document.createElement('div');
+    nm.className = 'nm';
+    nm.textContent = remTitle(r);
+    var sub = document.createElement('div');
+    sub.className = 'sub';
+    if (r.done) {
+      sub.textContent = 'Erledigt am ' + fmtDateShort(r.doneAt || r.due);
+    } else {
+      sub.appendChild(document.createTextNode(fmtDateLong(r.due) + (r.time ? ', ' + r.time + ' Uhr' : '') + ' · '));
+      var rel = document.createElement('span');
+      rel.className = 'rel';
+      rel.textContent = relLabel(days);
+      sub.appendChild(rel);
+      if (r.repeat) sub.appendChild(document.createTextNode(' · ' + repeatLabel(r.repeat)));
+    }
+    txt.appendChild(nm);
+    txt.appendChild(sub);
+    b.appendChild(txt);
+
+    var go = document.createElement('div');
+    go.className = 'go';
+    go.textContent = '›';
+    b.appendChild(go);
+
+    b.addEventListener('click', function () { openRemEdit(r); });
+    return b;
+  }
+
+  function renderRemView() {
+    var list = $('remList');
+    list.textContent = '';
+    var open = reminders.filter(function (r) { return !r.done; }).sort(byDue);
+    var done = reminders.filter(function (r) { return r.done; }).sort(function (a, b) {
+      var da = a.doneAt || a.due, db = b.doneAt || b.due;
+      return da < db ? 1 : da > db ? -1 : 0;
+    }).slice(0, 10);
+    $('remCal').disabled = !open.length;
+    $('remExport').disabled = !reminders.length;
+
+    if (!reminders.length) {
+      var empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = 'Noch keine Erinnerungen. Lege Impfungen, Tierarzt-Termine oder Wurmkuren an, die App zeigt dir dann an, was fällig ist.';
+      list.appendChild(empty);
+      return;
+    }
+    if (!open.length) {
+      var none = document.createElement('div');
+      none.className = 'empty';
+      none.textContent = 'Keine offenen Erinnerungen.';
+      list.appendChild(none);
+    }
+    [
+      ['Überfällig', 'late', open.filter(function (r) { return daysFromToday(r.due) < 0; })],
+      ['In den nächsten 30 Tagen', '', open.filter(function (r) { var d = daysFromToday(r.due); return d >= 0 && d <= 30; })],
+      ['Später', '', open.filter(function (r) { return daysFromToday(r.due) > 30; })],
+      ['Zuletzt erledigt', '', done]
+    ].forEach(function (g) {
+      if (!g[2].length) return;
+      var h = document.createElement('div');
+      h.className = 'rem-h' + (g[1] ? ' ' + g[1] : '');
+      h.textContent = g[0];
+      list.appendChild(h);
+      g[2].forEach(function (r) { list.appendChild(remItemEl(r)); });
+    });
+  }
+
+  // ----- Bearbeiten -----
+  function fillSelect(sel, opts) {
+    sel.textContent = '';
+    opts.forEach(function (o) {
+      var op = document.createElement('option');
+      op.value = o[0];
+      op.textContent = o[1];
+      sel.appendChild(op);
+    });
+  }
+  fillSelect($('remRepeat'), REPEATS);
+  fillSelect($('remLead'), LEADS);
+
+  function renderRemTypes() {
+    var box = $('remTypes');
+    box.textContent = '';
+    REM_TYPE_KEYS.forEach(function (k) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chip' + (remType === k ? ' sel' : '');
+      b.textContent = REM_TYPES[k].emoji + ' ' + REM_TYPES[k].label;
+      b.addEventListener('click', function () { setRemType(k, !editingRemId); });
+      box.appendChild(b);
+    });
+  }
+
+  // Bei einer neuen Erinnerung setzt der Typ sinnvolle Vorgaben (z. B. Impfung: jedes Jahr, 1 Woche vorher)
+  function setRemType(k, applyDefaults) {
+    remType = k;
+    if (applyDefaults) {
+      $('remRepeat').value = REM_TYPES[k].repeat;
+      $('remLead').value = REM_TYPES[k].lead;
+    }
+    $('remTitle').placeholder = REM_TYPES[k].ph;
+    renderRemTypes();
+  }
+
+  function openRemEdit(r) {
+    editingRemId = r ? r.id : null;
+    $('remEditTitle').textContent = r ? 'Bearbeiten' : 'Neu';
+    $('remTitle').value = r ? r.title : '';
+    $('remDue').value = r ? r.due : todayStr();
+    $('remTime').value = r ? r.time : '';
+    $('remNote').value = r ? r.note : '';
+    setRemType(r ? r.type : 'tierarzt', !r);
+    if (r) { $('remRepeat').value = r.repeat; $('remLead').value = r.lead; }
+    $('remEditActions').hidden = !r;
+    $('remDone').hidden = !!(r && r.done);
+    $('remReopen').hidden = !(r && r.done);
+    updateRemSave();
+    closeRemView();
+    $('remEdit').hidden = false;
+    $('remEditBody').scrollTop = 0;
+  }
+  function closeRemEdit() { $('remEdit').hidden = true; }
+
+  // Liest das Formular, null bei ungültigem Datum
+  function collectRemForm() {
+    var due = $('remDue').value;
+    if (!isDateStr(due)) return null;
+    var time = $('remTime').value;
+    return {
+      type: remType,
+      title: $('remTitle').value.trim().slice(0, 60),
+      due: due,
+      time: isTimeStr(time) ? time : '',
+      repeat: pickOpt(REPEATS, $('remRepeat').value, 0),
+      lead: pickOpt(LEADS, $('remLead').value, 1),
+      note: $('remNote').value.trim().slice(0, 300)
+    };
+  }
+  function updateRemSave() {
+    var ok = !!collectRemForm();
+    $('remSave').disabled = !ok;
+    $('remDone').disabled = !ok;
+    $('remIcs').disabled = !ok;
+  }
+  ['remDue', 'remTime', 'remRepeat', 'remLead'].forEach(function (id) {
+    $(id).addEventListener('input', updateRemSave);
+    $(id).addEventListener('change', updateRemSave);
+  });
+
+  function findRem(id) { return reminders.filter(function (r) { return r.id === id; })[0]; }
+
+  $('remBtn').addEventListener('click', openRemView);
+  $('remViewClose').addEventListener('click', closeRemView);
+  $('remNew').addEventListener('click', function () { openRemEdit(null); });
+  $('remCancel').addEventListener('click', function () { closeRemEdit(); openRemView(); });
+
+  $('remSave').addEventListener('click', function () {
+    var f = collectRemForm();
+    if (!f) return;
+    var next = editingRemId
+      ? reminders.map(function (r) { return r.id === editingRemId ? Object.assign({}, r, f) : r; })
+      : reminders.concat([Object.assign({ id: newId(), done: false, doneAt: '', next: '' }, f)]);
+    if (!commitReminders(next)) return;
+    closeRemEdit();
+    openRemView();
+    toast('Gespeichert ✓');
+  });
+
+  // Erledigt: Bei wiederkehrenden Terminen entsteht der nächste ab heute (Impfung heute + 12 Monate)
+  $('remDone').addEventListener('click', function () {
+    var f = collectRemForm();
+    var cur = editingRemId && findRem(editingRemId);
+    if (!f || !cur) return;
+    var today = todayStr();
+    var updated = Object.assign({}, cur, f, { done: true, doneAt: today, next: '' });
+    var successor = null;
+    if (updated.repeat > 0) {
+      successor = Object.assign({}, updated, { id: newId(), due: addMonthsStr(today, updated.repeat), done: false, doneAt: '', next: '' });
+      updated.next = successor.id;
+    }
+    var next = reminders.map(function (r) { return r.id === cur.id ? updated : r; });
+    if (successor) next.push(successor);
+    if (!commitReminders(next)) return;
+    closeRemEdit();
+    openRemView();
+    toast(successor ? 'Erledigt ✓ Nächste Erinnerung: ' + fmtDateShort(successor.due) : 'Erledigt ✓');
+  });
+
+  // Wieder öffnen: den automatisch angelegten Folgetermin entfernen, wenn er noch offen ist
+  $('remReopen').addEventListener('click', function () {
+    var cur = editingRemId && findRem(editingRemId);
+    if (!cur) return;
+    var next = reminders.filter(function (r) { return !(cur.next && r.id === cur.next && !r.done); })
+      .map(function (r) { return r.id === cur.id ? Object.assign({}, r, { done: false, doneAt: '', next: '' }) : r; });
+    if (!commitReminders(next)) return;
+    closeRemEdit();
+    openRemView();
+    toast('Wieder offen');
+  });
+
+  $('remDel').addEventListener('click', function () {
+    if (!editingRemId || !confirm('Diese Erinnerung löschen?')) return;
+    if (!commitReminders(reminders.filter(function (r) { return r.id !== editingRemId; }))) return;
+    closeRemEdit();
+    openRemView();
+    toast('Gelöscht');
+  });
+
+  // ----- Kalenderdatei (.ics): So meldet sich das Handy auch bei geschlossener App -----
+  function icsEscape(s) {
+    return String(s).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+  }
+  // Zeilen dürfen höchstens 75 Byte lang sein, längere werden mit Leerzeichen am Anfang fortgesetzt
+  function icsFold(line) {
+    var enc = new TextEncoder(), out = [], cur = '', bytes = 0;
+    Array.from(line).forEach(function (ch) {
+      var b = enc.encode(ch).length;
+      if (bytes + b > 75) { out.push(cur); cur = ' '; bytes = 1; }
+      cur += ch;
+      bytes += b;
+    });
+    out.push(cur);
+    return out.join('\r\n');
+  }
+  function icsLocal(date) {
+    return date.getFullYear() + pad2(date.getMonth() + 1) + pad2(date.getDate()) + 'T' + pad2(date.getHours()) + pad2(date.getMinutes()) + '00';
+  }
+  function buildIcs(list) {
+    var L = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Hunderoute//DE', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH'];
+    var stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+    list.forEach(function (r) {
+      var summary = REM_TYPES[r.type].emoji + ' ' + remTitle(r);
+      var desc = (r.note ? r.note + '\n' : '') + 'Erinnerung aus Hunderoute';
+      L.push('BEGIN:VEVENT', 'UID:' + r.id + '@hunderoute', 'DTSTAMP:' + stamp);
+      if (r.time) {
+        var st = new Date(+r.due.slice(0, 4), +r.due.slice(5, 7) - 1, +r.due.slice(8, 10), +r.time.slice(0, 2), +r.time.slice(3, 5));
+        L.push('DTSTART:' + icsLocal(st), 'DTEND:' + icsLocal(new Date(st.getTime() + 3600e3)));
+      } else {
+        L.push('DTSTART;VALUE=DATE:' + r.due.replace(/-/g, ''), 'DTEND;VALUE=DATE:' + addDaysStr(r.due, 1).replace(/-/g, ''));
+      }
+      L.push('SUMMARY:' + icsEscape(summary), 'DESCRIPTION:' + icsEscape(desc));
+      // Wecker: mit Uhrzeit relativ zum Termin, ohne Uhrzeit um 9 Uhr am Vorlauftag und am Tag selbst
+      var alarms = [];
+      if (r.time) {
+        if (r.lead > 0) alarms.push('-P' + r.lead + 'D');
+        alarms.push('-PT1H');
+      } else {
+        if (r.lead > 0) alarms.push(r.lead === 1 ? '-PT15H' : '-P' + (r.lead - 1) + 'DT15H');
+        alarms.push('PT9H');
+      }
+      alarms.forEach(function (trigger) {
+        L.push('BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:' + icsEscape(summary), 'TRIGGER;RELATED=START:' + trigger, 'END:VALARM');
+      });
+      L.push('END:VEVENT');
+    });
+    L.push('END:VCALENDAR');
+    return L.map(icsFold).join('\r\n') + '\r\n';
+  }
+
+  // Teilen-Menü des Handys (da gibt es "Kalender"), sonst normaler Download
+  function offerIcs(filename, text) {
+    var file = null;
+    try { file = new File([text], filename, { type: 'text/calendar' }); } catch (e) { /* ältere Browser */ }
+    if (file && navigator.canShare && navigator.share && navigator.canShare({ files: [file] })) {
+      navigator.share({ files: [file], title: 'Hunderoute' }).catch(function (e) {
+        if (!e || e.name !== 'AbortError') downloadText(filename, text, 'text/calendar;charset=utf-8');
+      });
+      return;
+    }
+    downloadText(filename, text, 'text/calendar;charset=utf-8');
+  }
+
+  $('remIcs').addEventListener('click', function () {
+    var f = collectRemForm();
+    if (!f) return;
+    offerIcs('hunderoute-erinnerung.ics', buildIcs([Object.assign({ id: editingRemId || newId() }, f)]));
+  });
+  $('remCal').addEventListener('click', function () {
+    var open = reminders.filter(function (r) { return !r.done; }).sort(byDue);
+    if (!open.length) return;
+    offerIcs('hunderoute-erinnerungen.ics', buildIcs(open));
+  });
+
+  // ----- Export und Import -----
+  $('remExport').addEventListener('click', function () {
+    if (!reminders.length) { toast('Noch keine Erinnerungen.'); return; }
+    downloadJson('hunderoute-erinnerungen.json', { hunderoute: 'reminders', version: 1, reminders: reminders });
+  });
+  $('remImportFile').addEventListener('change', function (ev) {
+    var file = ev.target.files && ev.target.files[0];
+    ev.target.value = '';
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      try {
+        var raw = JSON.parse(reader.result);
+        var incoming = sanitizeReminders(Array.isArray(raw) ? raw : raw && raw.reminders);
+        var known = {};
+        reminders.forEach(function (r) { known[r.id] = true; });
+        var fresh = incoming.filter(function (r) { if (known[r.id]) return false; known[r.id] = true; return true; });
+        if (fresh.length && !commitReminders(reminders.concat(fresh))) return;
+        renderRemView();
+        toast(fresh.length === 1 ? '1 Erinnerung importiert' : fresh.length + ' Erinnerungen importiert');
+      } catch (e) {
+        toast('Die Datei konnte nicht gelesen werden.');
+      }
+    };
+    reader.readAsText(file);
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    if (!$('remEdit').hidden) { closeRemEdit(); openRemView(); }
+    else if (!$('remView').hidden) closeRemView();
+  });
+
   // ---------- Menü ----------
   $('menuBtn').addEventListener('click', function () {
     closeAdd();
@@ -1126,7 +1609,11 @@
   });
 
   function downloadJson(filename, data) {
-    var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    downloadText(filename, JSON.stringify(data, null, 2), 'application/json');
+  }
+
+  function downloadText(filename, text, mime) {
+    var blob = new Blob([text], { type: mime });
     var url = URL.createObjectURL(blob);
     var a = document.createElement('a');
     a.href = url;
@@ -1211,6 +1698,8 @@
   render();
   updateWalkCount();
   restoreWalk();
+  updateRemBadge();
+  remindOnStart();
   if (!savedView) locate(false);
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {

@@ -1,6 +1,6 @@
 // Einfacher Offline-Cache: Die App selbst startet auch ohne Netz.
 // Kartenkacheln werden bewusst nicht gecacht (Nutzungsregeln von OpenStreetMap).
-var CACHE = 'hunderoute-v4';
+var CACHE = 'hunderoute-v5';
 var SHELL = [
   './', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest',
   'lib/leaflet.js', 'lib/leaflet.css',

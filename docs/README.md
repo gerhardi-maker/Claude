@@ -10,6 +10,12 @@ Häufchen und Pfützen, dazu eine Notiz. Der Bildschirm bleibt dabei an (Wake Lo
 bleiben, sonst pausiert die Aufzeichnung. Ein laufender Spaziergang übersteht ein Neuladen. Ungenaue
 GPS-Punkte, Rauschen und Ausreißer werden herausgefiltert. Das Protokoll lässt sich im Menü exportieren
 und importieren.
+Erinnerungen (🩺 oben) für Tierarzt-Termine, Impfungen, Entwurmung und Zeckenschutz: mit Datum, optional
+Uhrzeit, Wiederholung (z. B. jedes Jahr) und Vorlaufzeit. Ein roter Punkt am Button zeigt Fälliges und
+Überfälliges, beim Start der App kommt ein Hinweis. Wer eine Erinnerung als erledigt abhakt, bekommt bei
+wiederkehrenden Terminen automatisch den nächsten. Die App kann nicht benachrichtigen, wenn sie geschlossen
+ist (dafür bräuchte es einen Server). Deshalb lässt sich jeder Termin als Kalenderdatei (.ics) mit Wecker an den
+Handy-Kalender übergeben.
 Zu jedem Ort kann ein Foto gehören. Es wird beim Aufnehmen auf maximal 1280 Pixel verkleinert
 und in IndexedDB gespeichert (nicht in localStorage, dafür sind Fotos zu groß). Der Export
 enthält die Fotos, der Import stellt sie wieder her.
