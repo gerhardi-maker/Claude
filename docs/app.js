@@ -1392,6 +1392,7 @@
     $('remSave').disabled = !ok;
     $('remDone').disabled = !ok;
     $('remIcs').disabled = !ok;
+    $('remGcal').disabled = !ok;
   }
   ['remDue', 'remTime', 'remRepeat', 'remLead'].forEach(function (id) {
     $(id).addEventListener('input', updateRemSave);
@@ -1508,8 +1509,40 @@
     return L.map(icsFold).join('\r\n') + '\r\n';
   }
 
-  // Teilen-Menü des Handys (da gibt es "Kalender"), sonst normaler Download
+  function isIos() {
+    return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  }
+
+  // iPhone: Die Datei unter einer echten Web-Adresse mit dem Typ text/calendar ausliefern (über den
+  // Service Worker). Eine im Browser erzeugte Datei zeigt Safari nur an, eine echte Adresse übergibt es
+  // an den Kalender ("Zum Kalender hinzufügen"). Liefert false, wenn das nicht möglich ist.
+  function openIcsAsUrl(filename, text) {
+    if (!('serviceWorker' in navigator) || !window.caches) return Promise.resolve(false);
+    return navigator.serviceWorker.getRegistration().then(function (reg) {
+      if (!reg || !reg.active) return false;
+      var url = new URL('_ics/' + filename + '?t=' + Date.now(), document.baseURI).href;
+      return caches.delete('hunderoute-ics')                       // alte Dateien aufräumen
+        .then(function () { return caches.open('hunderoute-ics'); })
+        .then(function (c) {
+          return c.put(url, new Response(text, { headers: {
+            'Content-Type': 'text/calendar; charset=utf-8',
+            'Content-Disposition': 'inline; filename="' + filename + '"'
+          } }));
+        })
+        .then(function () { window.location.href = url; return true; });
+    }).catch(function () { return false; });
+  }
+
+  // iPhone: echte Adresse. Sonst: Teilen-Menü des Handys (da gibt es "Kalender"), sonst normaler Download.
   function offerIcs(filename, text) {
+    if (isIos()) {
+      openIcsAsUrl(filename, text).then(function (done) { if (!done) shareOrDownloadIcs(filename, text); });
+      return;
+    }
+    shareOrDownloadIcs(filename, text);
+  }
+
+  function shareOrDownloadIcs(filename, text) {
     var file = null;
     try { file = new File([text], filename, { type: 'text/calendar' }); } catch (e) { /* ältere Browser */ }
     if (file && navigator.canShare && navigator.share && navigator.canShare({ files: [file] })) {
@@ -1520,6 +1553,26 @@
     }
     downloadText(filename, text, 'text/calendar;charset=utf-8');
   }
+
+  // Zweiter Weg ohne Datei: Termin vorausgefüllt in Google Kalender öffnen (Wecker stellt man dort selbst ein)
+  function googleCalUrl(r) {
+    var dates;
+    if (r.time) {
+      var st = new Date(+r.due.slice(0, 4), +r.due.slice(5, 7) - 1, +r.due.slice(8, 10), +r.time.slice(0, 2), +r.time.slice(3, 5));
+      dates = icsLocal(st) + '/' + icsLocal(new Date(st.getTime() + 3600e3));
+    } else {
+      dates = r.due.replace(/-/g, '') + '/' + addDaysStr(r.due, 1).replace(/-/g, '');
+    }
+    var details = (r.note ? r.note + '\n' : '') + 'Erinnerung aus Hunderoute';
+    return 'https://calendar.google.com/calendar/render?action=TEMPLATE&text=' +
+      encodeURIComponent(REM_TYPES[r.type].emoji + ' ' + remTitle(r)) + '&dates=' + dates +
+      '&details=' + encodeURIComponent(details);
+  }
+  $('remGcal').addEventListener('click', function () {
+    var f = collectRemForm();
+    if (!f) return;
+    window.open(googleCalUrl(f), '_blank', 'noopener');
+  });
 
   $('remIcs').addEventListener('click', function () {
     var f = collectRemForm();
